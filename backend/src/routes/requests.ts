@@ -57,11 +57,12 @@ router.post('/', authenticate, (req: AuthRequest, res) => {
       VALUES (?, ?, ?, ?, ?, ?)
     `);
 
-    const typeText = {
+    const typeMap: { [key: string]: string } = {
       leave: '请假',
       swap: '调班',
       modify: '修改班次'
-    }[request_type];
+    };
+    const typeText = typeMap[request_type] || '请假';
 
     for (const admin of admins) {
       notificationStmt.run(

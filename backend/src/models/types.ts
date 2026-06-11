@@ -83,5 +83,6 @@ export interface SystemSetting {
 export interface JWTPayload {
   userId: number;
   username: string;
+  name: string;
   role: 'employee' | 'admin';
 }
