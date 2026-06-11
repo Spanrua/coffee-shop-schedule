@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    container_name: coffee-shop-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - JWT_SECRET=coffee-shop-secret-key-change-in-production
+      - DATABASE_PATH=/app/database/coffee-shop.db
+      - NODE_ENV=development
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - ./backend/database:/app/database
+    command: npm run dev
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: coffee-shop-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  db-data:

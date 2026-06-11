@@ -1,0 +1,36 @@
+{
+  "name": "coffee-shop-backend",
+  "version": "1.0.0",
+  "description": "Coffee shop scheduling and clock-in system backend",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "db:init": "node -r tsx/cjs src/scripts/initDb.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "bcrypt": "^5.1.1",
+    "jsonwebtoken": "^9.0.2",
+    "better-sqlite3": "^9.2.2",
+    "date-fns": "^3.0.6",
+    "exceljs": "^4.4.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/bcrypt": "^5.0.2",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.10.6",
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.0"
+  }
+}
