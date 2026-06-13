@@ -1,16 +1,21 @@
-FROM node:18-alpine
+FROM node:20-alpine
 
-# 安装编译工具（better-sqlite3 需要）
 RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
 COPY package*.json ./
-
-RUN npm install
+RUN npm ci
 
 COPY . .
+RUN npm run build
+
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV DATABASE_PATH=/app/data/coffee-shop.db
+
+RUN mkdir -p /app/data
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+CMD ["npm", "start"]

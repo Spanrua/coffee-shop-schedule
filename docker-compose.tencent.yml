@@ -1,0 +1,19 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: coffee-shop-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      DATABASE_PATH: /app/data/coffee-shop.db
+    volumes:
+      - coffee-shop-data:/app/data
+
+volumes:
+  coffee-shop-data:
