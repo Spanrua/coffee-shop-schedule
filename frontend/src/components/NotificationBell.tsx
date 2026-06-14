@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Bell, X, Check } from 'lucide-react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import api from '../services/api';
 import type { Notification } from '../types';
 
 export default function NotificationBell() {
@@ -25,16 +26,8 @@ export default function NotificationBell() {
 
   const fetchUnreadCount = async () => {
     try {
-      const response = await fetch('/api/notifications/unread-count', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setUnreadCount(data.count);
-      }
+      const response = await api.get('/notifications/unread-count');
+      setUnreadCount(Number(response.data?.count) || 0);
     } catch (error) {
       console.error('Failed to fetch unread count:', error);
     }
@@ -43,16 +36,8 @@ export default function NotificationBell() {
   const fetchNotifications = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/notifications', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setNotifications(data);
-      }
+      const response = await api.get('/notifications');
+      setNotifications(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error('Failed to fetch notifications:', error);
     } finally {
@@ -62,14 +47,9 @@ export default function NotificationBell() {
 
   const markAsRead = async (id: number) => {
     try {
-      const response = await fetch(`/api/notifications/${id}/read`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      const response = await api.put(`/notifications/${id}/read`);
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         setNotifications(notifications.map(n =>
           n.id === id ? { ...n, is_read: true } : n
         ));
@@ -82,14 +62,9 @@ export default function NotificationBell() {
 
   const markAllAsRead = async () => {
     try {
-      const response = await fetch('/api/notifications/read-all', {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      const response = await api.put('/notifications/read-all');
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         setNotifications(notifications.map(n => ({ ...n, is_read: true })));
         setUnreadCount(0);
       }
@@ -100,14 +75,9 @@ export default function NotificationBell() {
 
   const deleteNotification = async (id: number) => {
     try {
-      const response = await fetch(`/api/notifications/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      const response = await api.delete(`/notifications/${id}`);
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         const notification = notifications.find(n => n.id === id);
         setNotifications(notifications.filter(n => n.id !== id));
         if (notification && !notification.is_read) {
