@@ -93,12 +93,6 @@ export default function LoginPage() {
               </Link>
             </div>
           </div>
-
-          <div className="text-sm text-gray-600 space-y-1">
-            <p className="font-medium">测试账号:</p>
-            <p>• 管理员: admin / admin123</p>
-            <p>• 员工: emp001 / password123</p>
-          </div>
         </form>
       </div>
     </div>
