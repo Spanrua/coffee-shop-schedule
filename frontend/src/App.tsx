@@ -61,11 +61,31 @@ function AppRoutes() {
   );
 }
 
+function IcpFooter() {
+  return (
+    <footer className="border-t border-gray-100 bg-white py-3 text-center text-xs text-gray-500">
+      <a
+        href="https://beian.miit.gov.cn/"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:text-gray-700"
+      >
+        蜀ICP备2026033500号-1
+      </a>
+    </footer>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <div className="flex min-h-screen flex-col">
+          <main className="flex-1">
+            <AppRoutes />
+          </main>
+          <IcpFooter />
+        </div>
       </AuthProvider>
     </BrowserRouter>
   );

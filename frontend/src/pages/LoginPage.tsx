@@ -30,7 +30,7 @@ export default function LoginPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            ☕ 咖啡店排班打卡系统
+            ☕ 咖啡主理人时间管理小助手
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
             请使用您的账号登录
