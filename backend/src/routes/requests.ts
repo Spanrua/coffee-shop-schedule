@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import db from '../db';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
+import { buildStoreFilter, getManageableStoreContext, requireManageableStore } from '../utils/storeAccess';
 
 const router = Router();
 
@@ -49,7 +50,13 @@ router.post('/', authenticate, (req: AuthRequest, res) => {
     );
 
     // 获取所有管理员
-    const admins = db.prepare('SELECT id FROM users WHERE role = ?').all('admin') as any[];
+    const admins = db.prepare(`
+      SELECT DISTINCT u.id
+      FROM users u
+      LEFT JOIN user_store_access usa ON usa.user_id = u.id AND usa.access_type = 'manage'
+      WHERE u.role = 'admin'
+        AND (u.admin_scope = 'super' OR usa.store_id = ?)
+    `).all(shift.store_id) as any[];
 
     // 通知所有管理员
     const notificationStmt = db.prepare(`
@@ -115,11 +122,12 @@ router.get('/all', authenticate, requireAdmin, (req: AuthRequest, res) => {
     let query = `
       SELECT
         scr.*,
-        s.date, s.start_time, s.end_time,
+        s.date, s.start_time, s.end_time, s.store_id, st.name as store_name,
         u.name as requester_name, u.username as requester_username,
         admin.name as admin_name
       FROM shift_change_requests scr
       JOIN shifts s ON scr.shift_id = s.id
+      JOIN stores st ON s.store_id = st.id
       JOIN users u ON scr.requester_id = u.id
       LEFT JOIN users admin ON scr.admin_id = admin.id
       WHERE 1=1
@@ -131,14 +139,24 @@ router.get('/all', authenticate, requireAdmin, (req: AuthRequest, res) => {
       params.push(status);
     }
 
+    const storeId = requireManageableStore(req, req.query.store_id);
+    if (storeId) {
+      query += ' AND s.store_id = ?';
+      params.push(storeId);
+    } else {
+      const filter = buildStoreFilter('s', getManageableStoreContext(req).storeIds);
+      query += filter.clause;
+      params.push(...filter.params);
+    }
+
     query += ' ORDER BY scr.created_at DESC';
 
     const requests = db.prepare(query).all(...params);
 
     res.json(requests);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Get all requests error:', error);
-    res.status(500).json({ error: 'Failed to get requests' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get requests' });
   }
 });
 
@@ -150,7 +168,7 @@ router.post('/:id/approve', authenticate, requireAdmin, (req: AuthRequest, res) 
   try {
     // 获取申请详情
     const request = db.prepare(`
-      SELECT scr.*, s.user_id, s.date, s.start_time, s.end_time
+      SELECT scr.*, s.user_id, s.store_id, s.date, s.start_time, s.end_time
       FROM shift_change_requests scr
       JOIN shifts s ON scr.shift_id = s.id
       WHERE scr.id = ?
@@ -159,6 +177,7 @@ router.post('/:id/approve', authenticate, requireAdmin, (req: AuthRequest, res) 
     if (!request) {
       return res.status(404).json({ error: 'Request not found' });
     }
+    requireManageableStore(req, request.store_id);
 
     if (request.status !== 'pending') {
       return res.status(400).json({ error: '该申请已处理' });
@@ -201,9 +220,9 @@ router.post('/:id/approve', authenticate, requireAdmin, (req: AuthRequest, res) 
     transaction();
 
     res.json({ message: '申请已批准' });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Approve request error:', error);
-    res.status(500).json({ error: 'Failed to approve request' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to approve request' });
   }
 });
 
@@ -214,11 +233,17 @@ router.post('/:id/reject', authenticate, requireAdmin, (req: AuthRequest, res) =
 
   try {
     // 获取申请详情
-    const request = db.prepare('SELECT * FROM shift_change_requests WHERE id = ?').get(id) as any;
+    const request = db.prepare(`
+      SELECT scr.*, s.store_id
+      FROM shift_change_requests scr
+      JOIN shifts s ON scr.shift_id = s.id
+      WHERE scr.id = ?
+    `).get(id) as any;
 
     if (!request) {
       return res.status(404).json({ error: 'Request not found' });
     }
+    requireManageableStore(req, request.store_id);
 
     if (request.status !== 'pending') {
       return res.status(400).json({ error: '该申请已处理' });
@@ -249,9 +274,9 @@ router.post('/:id/reject', authenticate, requireAdmin, (req: AuthRequest, res) =
     transaction();
 
     res.json({ message: '申请已拒绝' });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Reject request error:', error);
-    res.status(500).json({ error: 'Failed to reject request' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to reject request' });
   }
 });
 

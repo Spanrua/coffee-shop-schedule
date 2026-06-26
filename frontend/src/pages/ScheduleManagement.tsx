@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { format, startOfWeek, addDays, addWeeks, subWeeks } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { Calendar, ChevronLeft, ChevronRight, Users, Plus, Sparkles, Clock, X } from 'lucide-react';
-import type { AvailableTime, User } from '../types';
+import api from '../services/api';
+import StoreSelector from '../components/StoreSelector';
+import type { AvailableTime, Store, User } from '../types';
 
 interface AvailableTimeWithUser extends AvailableTime {
   user_name: string;
@@ -34,6 +36,8 @@ export default function ScheduleManagement() {
   const [availableTimes, setAvailableTimes] = useState<AvailableTimeWithUser[]>([]);
   const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
   const [employees, setEmployees] = useState<User[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [selectedStoreId, setSelectedStoreId] = useState<number | ''>('');
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -54,8 +58,23 @@ export default function ScheduleManagement() {
   const weekEndStr = format(addDays(currentWeekStart, 6), 'yyyy-MM-dd');
 
   useEffect(() => {
-    fetchData();
-  }, [currentWeekStart]);
+    fetchStores();
+  }, []);
+
+  useEffect(() => {
+    if (selectedStoreId) {
+      fetchData();
+    }
+  }, [currentWeekStart, selectedStoreId]);
+
+  const fetchStores = async () => {
+    const response = await api.get('/stores');
+    const storeList = response.data as Store[];
+    setStores(storeList);
+    if (storeList.length > 0) {
+      setSelectedStoreId(storeList[0].id);
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -72,16 +91,10 @@ export default function ScheduleManagement() {
 
   const fetchAvailableTimes = async () => {
     try {
-      const response = await fetch(`/api/available-times/all/${weekStartStr}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
+      const response = await api.get(`/available-times/all/${weekStartStr}`, {
+        params: { store_id: selectedStoreId },
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableTimes(data);
-      }
+      setAvailableTimes(response.data);
     } catch (error) {
       console.error('Failed to fetch available times:', error);
     }
@@ -89,19 +102,14 @@ export default function ScheduleManagement() {
 
   const fetchSchedules = async () => {
     try {
-      const response = await fetch(
-        `/api/shifts?start_date=${weekStartStr}&end_date=${weekEndStr}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setSchedules(data);
-      }
+      const response = await api.get('/shifts', {
+        params: {
+          start_date: weekStartStr,
+          end_date: weekEndStr,
+          store_id: selectedStoreId,
+        },
+      });
+      setSchedules(response.data);
     } catch (error) {
       console.error('Failed to fetch schedules:', error);
     }
@@ -109,56 +117,53 @@ export default function ScheduleManagement() {
 
   const fetchEmployees = async () => {
     try {
-      const response = await fetch('/api/users', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setEmployees(data.filter((u: User) => u.role === 'employee' && u.status === 'active'));
-      }
+      const response = await api.get('/users');
+      setEmployees(
+        response.data.filter((u: User) =>
+          u.role === 'employee' &&
+          u.status === 'active' &&
+          (u.primary_store_id === selectedStoreId || u.support_store_ids?.includes(Number(selectedStoreId)))
+        )
+      );
     } catch (error) {
       console.error('Failed to fetch employees:', error);
     }
   };
 
   const handleAutoGenerate = async () => {
+    if (!selectedStoreId) {
+      alert('请先选择门店');
+      return;
+    }
+
     if (!confirm('自动生成排班会覆盖本周现有的排班，确定继续吗？')) {
       return;
     }
 
     setGenerating(true);
     try {
-      const response = await fetch('/api/shifts/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          week_start_date: weekStartStr,
-        }),
+      const response = await api.post('/shifts/generate', {
+        week_start_date: weekStartStr,
+        store_id: selectedStoreId,
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        alert(`成功生成 ${result.shifts_count} 个班次！${result.warnings ? '\n\n警告：\n' + result.warnings.join('\n') : ''}`);
-        await fetchSchedules();
-      } else {
-        const error = await response.json();
-        alert(`生成失败：${error.error}`);
-      }
-    } catch (error) {
+      const result = response.data;
+      alert(`成功生成 ${result.shifts_count} 个班次！${result.warnings ? '\n\n警告：\n' + result.warnings.join('\n') : ''}`);
+      await fetchSchedules();
+    } catch (error: any) {
       console.error('Generate failed:', error);
-      alert('生成失败，请重试');
+      alert(error.response?.data?.error || '生成失败，请重试');
     } finally {
       setGenerating(false);
     }
   };
 
   const handleAddShift = async () => {
+    if (!selectedStoreId) {
+      alert('请先选择门店');
+      return;
+    }
+
     if (!newShift.user_id || !newShift.date || !newShift.start_time || !newShift.end_time) {
       alert('请填写完整信息');
       return;
@@ -184,38 +189,27 @@ export default function ScheduleManagement() {
     }
 
     try {
-      const response = await fetch('/api/shifts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          user_id: parseInt(newShift.user_id),
-          date: newShift.date,
-          start_time: newShift.start_time,
-          end_time: newShift.end_time,
-        }),
+      await api.post('/shifts', {
+        user_id: parseInt(newShift.user_id),
+        store_id: selectedStoreId,
+        date: newShift.date,
+        start_time: newShift.start_time,
+        end_time: newShift.end_time,
       });
 
-      if (response.ok) {
-        alert('班次添加成功！');
-        setShowAddModal(false);
-        setSelectedEmployeeAvailable(null);
-        setNewShift({
-          user_id: '',
-          date: '',
-          start_time: '09:00',
-          end_time: '17:00',
-        });
-        await fetchSchedules();
-      } else {
-        const error = await response.json();
-        alert(`添加失败：${error.error}`);
-      }
-    } catch (error) {
+      alert('班次添加成功！');
+      setShowAddModal(false);
+      setSelectedEmployeeAvailable(null);
+      setNewShift({
+        user_id: '',
+        date: '',
+        start_time: '09:00',
+        end_time: '17:00',
+      });
+      await fetchSchedules();
+    } catch (error: any) {
       console.error('Add shift failed:', error);
-      alert('添加失败，请重试');
+      alert(error.response?.data?.error || '添加失败，请重试');
     }
   };
 
@@ -225,21 +219,12 @@ export default function ScheduleManagement() {
     }
 
     try {
-      const response = await fetch(`/api/shifts/${shiftId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      await api.delete(`/shifts/${shiftId}`);
 
-      if (response.ok) {
-        await fetchSchedules();
-      } else {
-        alert('删除失败');
-      }
-    } catch (error) {
+      await fetchSchedules();
+    } catch (error: any) {
       console.error('Delete shift failed:', error);
-      alert('删除失败，请重试');
+      alert(error.response?.data?.error || '删除失败，请重试');
     }
   };
 
@@ -374,7 +359,12 @@ export default function ScheduleManagement() {
             </div>
           </div>
           <p className="text-gray-600 ml-14">可视化查看和管理员工排班</p>
-          <div className="absolute top-6 right-6 flex gap-3">
+          <div className="absolute top-6 right-6 flex items-center gap-3">
+            <StoreSelector
+              stores={stores}
+              value={selectedStoreId}
+              onChange={(storeId) => setSelectedStoreId(storeId)}
+            />
             <button
               onClick={() => {
                 setNewShift({

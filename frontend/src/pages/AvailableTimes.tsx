@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { format, startOfWeek, addDays, addWeeks, subWeeks } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { Calendar, Plus, Trash2, Save, ChevronLeft, ChevronRight } from 'lucide-react';
-import type { AvailableTime } from '../types';
+import api from '../services/api';
+import StoreSelector from '../components/StoreSelector';
+import type { AvailableTime, Store } from '../types';
 
 interface TimeSlot {
   day_of_week: number;
@@ -17,32 +19,44 @@ export default function AvailableTimes() {
     startOfWeek(new Date(), { weekStartsOn: 0 })
   );
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [selectedStoreId, setSelectedStoreId] = useState<number | ''>('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const weekStartStr = format(currentWeekStart, 'yyyy-MM-dd');
 
   useEffect(() => {
-    fetchAvailableTimes();
-  }, [currentWeekStart]);
+    fetchStores();
+  }, []);
+
+  useEffect(() => {
+    if (selectedStoreId) {
+      fetchAvailableTimes();
+    }
+  }, [currentWeekStart, selectedStoreId]);
+
+  const fetchStores = async () => {
+    const response = await api.get('/stores');
+    const storeList = response.data as Store[];
+    setStores(storeList);
+    if (storeList.length > 0) {
+      setSelectedStoreId(storeList[0].id);
+    }
+  };
 
   const fetchAvailableTimes = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/available-times/my/${weekStartStr}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
+      const response = await api.get(`/available-times/my/${weekStartStr}`, {
+        params: { store_id: selectedStoreId },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setTimeSlots(data.map((item: AvailableTime) => ({
-          day_of_week: item.day_of_week,
-          start_time: item.start_time,
-          end_time: item.end_time,
-        })));
-      }
+      setTimeSlots(response.data.map((item: AvailableTime) => ({
+        day_of_week: item.day_of_week,
+        start_time: item.start_time,
+        end_time: item.end_time,
+      })));
     } catch (error) {
       console.error('Failed to fetch available times:', error);
     } finally {
@@ -69,6 +83,11 @@ export default function AvailableTimes() {
   };
 
   const handleSubmit = async () => {
+    if (!selectedStoreId) {
+      alert('请先选择门店');
+      return;
+    }
+
     if (timeSlots.length === 0) {
       alert('请至少添加一个可用时间段');
       return;
@@ -84,52 +103,41 @@ export default function AvailableTimes() {
 
     setSubmitting(true);
     try {
-      const response = await fetch('/api/available-times', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          week_start_date: weekStartStr,
-          available_times: timeSlots,
-        }),
+      await api.post('/available-times', {
+        week_start_date: weekStartStr,
+        store_id: selectedStoreId,
+        available_times: timeSlots,
       });
 
-      if (response.ok) {
-        alert('可用时间提交成功！');
-      } else {
-        const error = await response.json();
-        alert(`提交失败：${error.error}`);
-      }
-    } catch (error) {
+      alert('可用时间提交成功！');
+    } catch (error: any) {
       console.error('Submit failed:', error);
-      alert('提交失败，请重试');
+      alert(error.response?.data?.error || '提交失败，请重试');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleClearWeek = async () => {
+    if (!selectedStoreId) {
+      alert('请先选择门店');
+      return;
+    }
+
     if (!confirm('确定要清空本周的可用时间吗？')) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/available-times/${weekStartStr}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
+      await api.delete(`/available-times/${weekStartStr}`, {
+        params: { store_id: selectedStoreId },
       });
 
-      if (response.ok) {
-        setTimeSlots([]);
-        alert('已清空本周可用时间');
-      }
-    } catch (error) {
+      setTimeSlots([]);
+      alert('已清空本周可用时间');
+    } catch (error: any) {
       console.error('Delete failed:', error);
-      alert('清空失败，请重试');
+      alert(error.response?.data?.error || '清空失败，请重试');
     }
   };
 
@@ -159,19 +167,30 @@ export default function AvailableTimes() {
       <div className="max-w-6xl mx-auto">
         {/* 标题 */}
         <div className="mb-6">
-          <div className="flex items-center gap-3 mb-2">
-            <a
-              href="/employee"
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              title="返回工作台"
-            >
-              <ChevronLeft className="w-6 h-6 text-gray-600" />
-            </a>
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="flex items-center gap-3">
+              <a
+                href="/employee"
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                title="返回工作台"
+              >
+                <ChevronLeft className="w-6 h-6 text-gray-600" />
+              </a>
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">我的可用时间</h1>
+              </div>
+            </div>
+            <StoreSelector
+              stores={stores}
+              value={selectedStoreId}
+              onChange={(storeId) => setSelectedStoreId(storeId)}
+            />
+          </div>
+          <div className="ml-14">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">我的可用时间</h1>
+              <p className="text-gray-600">提交你每周可以工作的时间段，方便管理员安排排班</p>
             </div>
           </div>
-          <p className="text-gray-600 ml-14">提交你每周可以工作的时间段，方便管理员安排排班</p>
         </div>
 
         {/* 周选择器 */}

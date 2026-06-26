@@ -8,9 +8,10 @@ const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = __importDefault(require("../db"));
 const auth_1 = require("../middleware/auth");
 const date_fns_1 = require("date-fns");
+const storeAccess_1 = require("../utils/storeAccess");
 const router = (0, express_1.Router)();
 // 计算工资
-function calculatePayroll(startDate, endDate, userId) {
+function calculatePayroll(startDate, endDate, userId, storeIds) {
     // 获取系统配置
     const settings = db_1.default.prepare('SELECT setting_key, setting_value FROM system_settings').all();
     const config = {};
@@ -35,6 +36,10 @@ function calculatePayroll(startDate, endDate, userId) {
     if (userId) {
         query += ' AND cr.user_id = ?';
         params.push(userId);
+    }
+    if (storeIds && storeIds.length > 0) {
+        query += ` AND cr.store_id IN (${storeIds.map(() => '?').join(', ')})`;
+        params.push(...storeIds);
     }
     query += ' ORDER BY u.id, cr.date, cr.clock_in_time';
     const records = db_1.default.prepare(query).all(...params);
@@ -128,13 +133,18 @@ router.get('/', auth_1.authenticate, (req, res) => {
         return res.status(400).json({ error: 'start_date and end_date are required' });
     }
     try {
+        let storeIds;
+        if (req.user.role === 'admin') {
+            const storeId = (0, storeAccess_1.requireManageableStore)(req, req.query.store_id);
+            storeIds = storeId ? [storeId] : (0, storeAccess_1.getManageableStoreContext)(req).storeIds;
+        }
         const targetUserId = req.user.role === 'admin' ? (user_id ? parseInt(user_id) : undefined) : req.user.userId;
-        const payroll = calculatePayroll(start_date, end_date, targetUserId);
+        const payroll = calculatePayroll(start_date, end_date, targetUserId, storeIds);
         res.json(payroll);
     }
     catch (error) {
         console.error('Get payroll error:', error);
-        res.status(500).json({ error: 'Failed to get payroll' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get payroll' });
     }
 });
 // 导出工资表
@@ -144,7 +154,9 @@ router.get('/export', auth_1.authenticate, auth_1.requireAdmin, async (req, res)
         return res.status(400).json({ error: 'start_date and end_date are required' });
     }
     try {
-        const payroll = calculatePayroll(start_date, end_date);
+        const storeId = (0, storeAccess_1.requireManageableStore)(req, req.query.store_id);
+        const storeIds = storeId ? [storeId] : (0, storeAccess_1.getManageableStoreContext)(req).storeIds;
+        const payroll = calculatePayroll(start_date, end_date, undefined, storeIds);
         if (exportFormat === 'csv') {
             // CSV 导出
             let csv = '姓名,用户名,时薪,总工时,正常工资,加班工资,周末工资,总工资\n';
@@ -224,7 +236,7 @@ router.get('/export', auth_1.authenticate, auth_1.requireAdmin, async (req, res)
     }
     catch (error) {
         console.error('Export payroll error:', error);
-        res.status(500).json({ error: 'Failed to export payroll' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to export payroll' });
     }
 });
 exports.default = router;

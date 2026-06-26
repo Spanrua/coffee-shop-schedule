@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { FileText, Plus, Clock, CheckCircle, XCircle, AlertCircle, Trash2, ChevronLeft } from 'lucide-react';
+import api from '../services/api';
 import type { ShiftChangeRequest, Shift } from '../types';
 
 export default function EmployeeRequests() {
@@ -32,16 +33,8 @@ export default function EmployeeRequests() {
 
   const fetchRequests = async () => {
     try {
-      const response = await fetch('/api/requests/my', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setRequests(data);
-      }
+      const response = await api.get('/requests/my');
+      setRequests(response.data);
     } catch (error) {
       console.error('Failed to fetch requests:', error);
     }
@@ -50,20 +43,11 @@ export default function EmployeeRequests() {
   const fetchMyShifts = async () => {
     try {
       const today = format(new Date(), 'yyyy-MM-dd');
-      const response = await fetch(`/api/shifts/my?start_date=${today}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        // 只显示未来的班次和状态为scheduled的
-        const futureShifts = data.filter((s: Shift) =>
-          s.date >= today && s.status === 'scheduled'
-        );
-        setMyShifts(futureShifts);
-      }
+      const response = await api.get('/shifts/my', { params: { start_date: today } });
+      const futureShifts = response.data.filter((s: Shift) =>
+        s.date >= today && s.status === 'scheduled'
+      );
+      setMyShifts(futureShifts);
     } catch (error) {
       console.error('Failed to fetch shifts:', error);
     }
@@ -87,39 +71,27 @@ export default function EmployeeRequests() {
     }
 
     try {
-      const response = await fetch('/api/requests', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          shift_id: parseInt(newRequest.shift_id),
-          request_type: newRequest.request_type,
-          reason: newRequest.reason || null,
-          new_start_time: newRequest.new_start_time || null,
-          new_end_time: newRequest.new_end_time || null,
-        }),
+      await api.post('/requests', {
+        shift_id: parseInt(newRequest.shift_id),
+        request_type: newRequest.request_type,
+        reason: newRequest.reason || null,
+        new_start_time: newRequest.new_start_time || null,
+        new_end_time: newRequest.new_end_time || null,
       });
 
-      if (response.ok) {
-        alert('申请已提交，等待管理员审批');
-        setShowAddModal(false);
-        setNewRequest({
-          shift_id: '',
-          request_type: 'leave',
-          reason: '',
-          new_start_time: '',
-          new_end_time: '',
-        });
-        await fetchData();
-      } else {
-        const error = await response.json();
-        alert(`提交失败：${error.error}`);
-      }
-    } catch (error) {
+      alert('申请已提交，等待管理员审批');
+      setShowAddModal(false);
+      setNewRequest({
+        shift_id: '',
+        request_type: 'leave',
+        reason: '',
+        new_start_time: '',
+        new_end_time: '',
+      });
+      await fetchData();
+    } catch (error: any) {
       console.error('Submit request failed:', error);
-      alert('提交失败，请重试');
+      alert(error.response?.data?.error || '提交失败，请重试');
     }
   };
 
@@ -129,22 +101,11 @@ export default function EmployeeRequests() {
     }
 
     try {
-      const response = await fetch(`/api/requests/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
-
-      if (response.ok) {
-        await fetchRequests();
-      } else {
-        const error = await response.json();
-        alert(`删除失败：${error.error}`);
-      }
-    } catch (error) {
+      await api.delete(`/requests/${id}`);
+      await fetchRequests();
+    } catch (error: any) {
       console.error('Delete request failed:', error);
-      alert('删除失败，请重试');
+      alert(error.response?.data?.error || '删除失败，请重试');
     }
   };
 

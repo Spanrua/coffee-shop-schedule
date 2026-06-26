@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const db_1 = __importDefault(require("../db"));
 const auth_1 = require("../middleware/auth");
+const storeAccess_1 = require("../utils/storeAccess");
 const router = (0, express_1.Router)();
 // 创建请假/调班申请
 router.post('/', auth_1.authenticate, (req, res) => {
@@ -35,7 +36,13 @@ router.post('/', auth_1.authenticate, (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, 'pending')
     `).run(req.user.userId, shift_id, request_type, reason || null, new_start_time || null, new_end_time || null);
         // 获取所有管理员
-        const admins = db_1.default.prepare('SELECT id FROM users WHERE role = ?').all('admin');
+        const admins = db_1.default.prepare(`
+      SELECT DISTINCT u.id
+      FROM users u
+      LEFT JOIN user_store_access usa ON usa.user_id = u.id AND usa.access_type = 'manage'
+      WHERE u.role = 'admin'
+        AND (u.admin_scope = 'super' OR usa.store_id = ?)
+    `).all(shift.store_id);
         // 通知所有管理员
         const notificationStmt = db_1.default.prepare(`
       INSERT INTO notifications (user_id, title, message, type, related_id, related_type)
@@ -88,11 +95,12 @@ router.get('/all', auth_1.authenticate, auth_1.requireAdmin, (req, res) => {
         let query = `
       SELECT
         scr.*,
-        s.date, s.start_time, s.end_time,
+        s.date, s.start_time, s.end_time, s.store_id, st.name as store_name,
         u.name as requester_name, u.username as requester_username,
         admin.name as admin_name
       FROM shift_change_requests scr
       JOIN shifts s ON scr.shift_id = s.id
+      JOIN stores st ON s.store_id = st.id
       JOIN users u ON scr.requester_id = u.id
       LEFT JOIN users admin ON scr.admin_id = admin.id
       WHERE 1=1
@@ -102,13 +110,23 @@ router.get('/all', auth_1.authenticate, auth_1.requireAdmin, (req, res) => {
             query += ' AND scr.status = ?';
             params.push(status);
         }
+        const storeId = (0, storeAccess_1.requireManageableStore)(req, req.query.store_id);
+        if (storeId) {
+            query += ' AND s.store_id = ?';
+            params.push(storeId);
+        }
+        else {
+            const filter = (0, storeAccess_1.buildStoreFilter)('s', (0, storeAccess_1.getManageableStoreContext)(req).storeIds);
+            query += filter.clause;
+            params.push(...filter.params);
+        }
         query += ' ORDER BY scr.created_at DESC';
         const requests = db_1.default.prepare(query).all(...params);
         res.json(requests);
     }
     catch (error) {
         console.error('Get all requests error:', error);
-        res.status(500).json({ error: 'Failed to get requests' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get requests' });
     }
 });
 // 审批申请（管理员）
@@ -118,7 +136,7 @@ router.post('/:id/approve', auth_1.authenticate, auth_1.requireAdmin, (req, res)
     try {
         // 获取申请详情
         const request = db_1.default.prepare(`
-      SELECT scr.*, s.user_id, s.date, s.start_time, s.end_time
+      SELECT scr.*, s.user_id, s.store_id, s.date, s.start_time, s.end_time
       FROM shift_change_requests scr
       JOIN shifts s ON scr.shift_id = s.id
       WHERE scr.id = ?
@@ -126,6 +144,7 @@ router.post('/:id/approve', auth_1.authenticate, auth_1.requireAdmin, (req, res)
         if (!request) {
             return res.status(404).json({ error: 'Request not found' });
         }
+        (0, storeAccess_1.requireManageableStore)(req, request.store_id);
         if (request.status !== 'pending') {
             return res.status(400).json({ error: '该申请已处理' });
         }
@@ -159,7 +178,7 @@ router.post('/:id/approve', auth_1.authenticate, auth_1.requireAdmin, (req, res)
     }
     catch (error) {
         console.error('Approve request error:', error);
-        res.status(500).json({ error: 'Failed to approve request' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to approve request' });
     }
 });
 // 拒绝申请（管理员）
@@ -168,10 +187,16 @@ router.post('/:id/reject', auth_1.authenticate, auth_1.requireAdmin, (req, res) 
     const { admin_notes } = req.body;
     try {
         // 获取申请详情
-        const request = db_1.default.prepare('SELECT * FROM shift_change_requests WHERE id = ?').get(id);
+        const request = db_1.default.prepare(`
+      SELECT scr.*, s.store_id
+      FROM shift_change_requests scr
+      JOIN shifts s ON scr.shift_id = s.id
+      WHERE scr.id = ?
+    `).get(id);
         if (!request) {
             return res.status(404).json({ error: 'Request not found' });
         }
+        (0, storeAccess_1.requireManageableStore)(req, request.store_id);
         if (request.status !== 'pending') {
             return res.status(400).json({ error: '该申请已处理' });
         }
@@ -193,7 +218,7 @@ router.post('/:id/reject', auth_1.authenticate, auth_1.requireAdmin, (req, res) 
     }
     catch (error) {
         console.error('Reject request error:', error);
-        res.status(500).json({ error: 'Failed to reject request' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to reject request' });
     }
 });
 // 删除申请

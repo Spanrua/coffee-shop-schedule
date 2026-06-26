@@ -3,6 +3,7 @@ import db from '../db';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import { ClockRecord } from '../models/types';
 import { format, parseISO, differenceInMinutes } from 'date-fns';
+import { buildStoreFilter, getManageableStoreContext, parseRequestedStoreId, requireManageableStore } from '../utils/storeAccess';
 
 const router = Router();
 
@@ -27,7 +28,7 @@ router.post('/in', authenticate, (req: AuthRequest, res) => {
 
     // 检查异常：打卡时间与排班时间的差距
     let isAnomaly = false;
-    let shift = null;
+    let shift: any = null;
 
     if (shift_id) {
       shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(shift_id) as any;
@@ -48,9 +49,9 @@ router.post('/in', authenticate, (req: AuthRequest, res) => {
 
     // 插入打卡记录
     const result = db.prepare(`
-      INSERT INTO clock_records (shift_id, user_id, date, clock_in_time, is_anomaly)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(shift_id || null, req.user!.userId, today, clockInTime, isAnomaly ? 1 : 0);
+      INSERT INTO clock_records (shift_id, user_id, store_id, date, clock_in_time, is_anomaly)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(shift_id || null, req.user!.userId, shift?.store_id || null, today, clockInTime, isAnomaly ? 1 : 0);
 
     const record = db.prepare('SELECT * FROM clock_records WHERE id = ?')
       .get(result.lastInsertRowid) as ClockRecord;
@@ -133,19 +134,38 @@ router.get('/today', authenticate, (req: AuthRequest, res) => {
   const today = format(new Date(), 'yyyy-MM-dd');
 
   try {
-    const records = db.prepare(`
-      SELECT cr.*, s.start_time as shift_start, s.end_time as shift_end, u.name as user_name
+    let query = `
+      SELECT cr.*, s.start_time as shift_start, s.end_time as shift_end, u.name as user_name, st.name as store_name
       FROM clock_records cr
       LEFT JOIN shifts s ON cr.shift_id = s.id
       LEFT JOIN users u ON cr.user_id = u.id
+      LEFT JOIN stores st ON cr.store_id = st.id
       WHERE cr.date = ?
-      ORDER BY cr.clock_in_time DESC
-    `).all(today) as any[];
+    `;
+    const params: any[] = [today];
+
+    if (req.user!.role === 'admin') {
+      const storeId = requireManageableStore(req, req.query.store_id);
+      if (storeId) {
+        query += ' AND cr.store_id = ?';
+        params.push(storeId);
+      } else {
+        const filter = buildStoreFilter('cr', getManageableStoreContext(req).storeIds);
+        query += filter.clause;
+        params.push(...filter.params);
+      }
+    } else {
+      query += ' AND cr.user_id = ?';
+      params.push(req.user!.userId);
+    }
+
+    query += ' ORDER BY cr.clock_in_time DESC';
+    const records = db.prepare(query).all(...params) as any[];
 
     res.json(records);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Get today records error:', error);
-    res.status(500).json({ error: 'Failed to get today records' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get today records' });
   }
 });
 
@@ -188,10 +208,12 @@ router.get('/records', authenticate, requireAdmin, (req: AuthRequest, res) => {
 
   try {
     let query = `
-      SELECT cr.*, s.start_time as shift_start, s.end_time as shift_end, u.name as user_name, u.username
+      SELECT cr.*, s.start_time as shift_start, s.end_time as shift_end, u.name as user_name, u.username,
+             st.name as store_name
       FROM clock_records cr
       LEFT JOIN shifts s ON cr.shift_id = s.id
       LEFT JOIN users u ON cr.user_id = u.id
+      LEFT JOIN stores st ON cr.store_id = st.id
       WHERE 1=1
     `;
     const params: any[] = [];
@@ -209,14 +231,24 @@ router.get('/records', authenticate, requireAdmin, (req: AuthRequest, res) => {
       params.push(user_id);
     }
 
+    const storeId = requireManageableStore(req, req.query.store_id);
+    if (storeId) {
+      query += ' AND cr.store_id = ?';
+      params.push(storeId);
+    } else {
+      const filter = buildStoreFilter('cr', getManageableStoreContext(req).storeIds);
+      query += filter.clause;
+      params.push(...filter.params);
+    }
+
     query += ' ORDER BY cr.date DESC, cr.clock_in_time DESC';
 
     const records = db.prepare(query).all(...params) as any[];
 
     res.json(records);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Get records error:', error);
-    res.status(500).json({ error: 'Failed to get records' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get records' });
   }
 });
 
@@ -226,10 +258,14 @@ router.put('/records/:id', authenticate, requireAdmin, (req: AuthRequest, res) =
   const { clock_in_time, clock_out_time, is_anomaly, admin_approved, notes } = req.body;
 
   try {
-    const record = db.prepare('SELECT id FROM clock_records WHERE id = ?').get(id);
+    const record = db.prepare('SELECT id, store_id FROM clock_records WHERE id = ?').get(id) as any;
 
     if (!record) {
       return res.status(404).json({ error: 'Record not found' });
+    }
+
+    if (record.store_id) {
+      requireManageableStore(req, record.store_id);
     }
 
     let query = 'UPDATE clock_records SET updated_at = CURRENT_TIMESTAMP';
@@ -265,9 +301,9 @@ router.put('/records/:id', authenticate, requireAdmin, (req: AuthRequest, res) =
       .get(id) as ClockRecord;
 
     res.json(updatedRecord);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Update record error:', error);
-    res.status(500).json({ error: 'Failed to update record' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update record' });
   }
 });
 
@@ -276,19 +312,39 @@ router.get('/on-duty', authenticate, (req: AuthRequest, res) => {
   const today = format(new Date(), 'yyyy-MM-dd');
 
   try {
-    const onDuty = db.prepare(`
-      SELECT cr.*, u.name as user_name, u.username, s.start_time as shift_start, s.end_time as shift_end
+    let query = `
+      SELECT cr.*, u.name as user_name, u.username, s.start_time as shift_start, s.end_time as shift_end,
+             st.name as store_name
       FROM clock_records cr
       JOIN users u ON cr.user_id = u.id
       LEFT JOIN shifts s ON cr.shift_id = s.id
+      LEFT JOIN stores st ON cr.store_id = st.id
       WHERE cr.date = ? AND cr.clock_in_time IS NOT NULL AND cr.clock_out_time IS NULL
-      ORDER BY cr.clock_in_time
-    `).all(today) as any[];
+    `;
+    const params: any[] = [today];
+
+    if (req.user!.role === 'admin') {
+      const storeId = requireManageableStore(req, req.query.store_id);
+      if (storeId) {
+        query += ' AND cr.store_id = ?';
+        params.push(storeId);
+      } else {
+        const filter = buildStoreFilter('cr', getManageableStoreContext(req).storeIds);
+        query += filter.clause;
+        params.push(...filter.params);
+      }
+    } else {
+      query += ' AND cr.user_id = ?';
+      params.push(req.user!.userId);
+    }
+
+    query += ' ORDER BY cr.clock_in_time';
+    const onDuty = db.prepare(query).all(...params) as any[];
 
     res.json(onDuty);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Get on-duty error:', error);
-    res.status(500).json({ error: 'Failed to get on-duty staff' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get on-duty staff' });
   }
 });
 

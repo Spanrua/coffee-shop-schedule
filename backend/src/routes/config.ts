@@ -2,15 +2,33 @@ import { Router } from 'express';
 import db from '../db';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import { ShiftRequirement, SystemSetting } from '../models/types';
+import {
+  buildStoreFilter,
+  getManageableStoreContext,
+  parseRequestedStoreId,
+  requireManageableStore,
+} from '../utils/storeAccess';
 
 const router = Router();
 
-// 获取班次需求配置
 router.get('/shift-requirements', authenticate, (req: AuthRequest, res) => {
   try {
-    const requirements = db.prepare('SELECT * FROM shift_requirements ORDER BY day_of_week, time_slot_start')
-      .all() as ShiftRequirement[];
+    let query = 'SELECT * FROM shift_requirements WHERE 1=1';
+    const params: any[] = [];
+    const storeId = parseRequestedStoreId(req.query.store_id);
 
+    if (storeId && !Number.isNaN(storeId)) {
+      query += ' AND store_id = ?';
+      params.push(storeId);
+    } else if (req.user!.role === 'admin') {
+      const filter = buildStoreFilter('shift_requirements', getManageableStoreContext(req).storeIds);
+      query += filter.clause;
+      params.push(...filter.params);
+    }
+
+    query += ' ORDER BY store_id, day_of_week, time_slot_start';
+
+    const requirements = db.prepare(query).all(...params) as ShiftRequirement[];
     res.json(requirements);
   } catch (error) {
     console.error('Get shift requirements error:', error);
@@ -18,39 +36,46 @@ router.get('/shift-requirements', authenticate, (req: AuthRequest, res) => {
   }
 });
 
-// 更新班次需求配置（管理员）
 router.put('/shift-requirements', authenticate, requireAdmin, (req: AuthRequest, res) => {
-  const { requirements } = req.body;
+  const { store_id, requirements } = req.body;
 
-  if (!Array.isArray(requirements)) {
-    return res.status(400).json({ error: 'Invalid request data' });
+  if (!store_id || !Array.isArray(requirements)) {
+    return res.status(400).json({ error: 'store_id and requirements are required' });
   }
 
   try {
-    // 删除旧配置
-    db.prepare('DELETE FROM shift_requirements').run();
+    const storeId = requireManageableStore(req, store_id);
+    if (!storeId) {
+      return res.status(400).json({ error: 'store_id is required' });
+    }
 
-    // 插入新配置
+    db.prepare('DELETE FROM shift_requirements WHERE store_id = ?').run(storeId);
+
     const insertStmt = db.prepare(
-      'INSERT INTO shift_requirements (day_of_week, time_slot_start, time_slot_end, min_employees) VALUES (?, ?, ?, ?)'
+      'INSERT INTO shift_requirements (store_id, day_of_week, time_slot_start, time_slot_end, min_employees) VALUES (?, ?, ?, ?, ?)'
     );
 
     const insertMany = db.transaction((reqs: any[]) => {
-      for (const req of reqs) {
-        insertStmt.run(req.day_of_week, req.time_slot_start, req.time_slot_end, req.min_employees);
+      for (const requirement of reqs) {
+        insertStmt.run(
+          storeId,
+          requirement.day_of_week,
+          requirement.time_slot_start,
+          requirement.time_slot_end,
+          requirement.min_employees
+        );
       }
     });
 
     insertMany(requirements);
 
     res.json({ message: 'Shift requirements updated successfully' });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Update shift requirements error:', error);
-    res.status(500).json({ error: 'Failed to update shift requirements' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update shift requirements' });
   }
 });
 
-// 获取系统设置
 router.get('/settings', authenticate, (req: AuthRequest, res) => {
   try {
     const settings = db.prepare('SELECT * FROM system_settings ORDER BY setting_key')
@@ -63,7 +88,6 @@ router.get('/settings', authenticate, (req: AuthRequest, res) => {
   }
 });
 
-// 更新系统设置（管理员）
 router.put('/settings', authenticate, requireAdmin, (req: AuthRequest, res) => {
   const { settings } = req.body;
 

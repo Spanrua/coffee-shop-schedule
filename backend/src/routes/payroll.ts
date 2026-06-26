@@ -3,11 +3,12 @@ import ExcelJS from 'exceljs';
 import db from '../db';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import { format, parseISO, differenceInHours, getDay } from 'date-fns';
+import { buildStoreFilter, getManageableStoreContext, requireManageableStore } from '../utils/storeAccess';
 
 const router = Router();
 
 // 计算工资
-function calculatePayroll(startDate: string, endDate: string, userId?: number) {
+function calculatePayroll(startDate: string, endDate: string, userId?: number, storeIds?: number[]) {
   // 获取系统配置
   const settings = db.prepare('SELECT setting_key, setting_value FROM system_settings').all() as any[];
   const config: any = {};
@@ -35,6 +36,10 @@ function calculatePayroll(startDate: string, endDate: string, userId?: number) {
   if (userId) {
     query += ' AND cr.user_id = ?';
     params.push(userId);
+  }
+  if (storeIds && storeIds.length > 0) {
+    query += ` AND cr.store_id IN (${storeIds.map(() => '?').join(', ')})`;
+    params.push(...storeIds);
   }
 
   query += ' ORDER BY u.id, cr.date, cr.clock_in_time';
@@ -142,13 +147,19 @@ router.get('/', authenticate, (req: AuthRequest, res) => {
   }
 
   try {
+    let storeIds: number[] | undefined;
+    if (req.user!.role === 'admin') {
+      const storeId = requireManageableStore(req, req.query.store_id);
+      storeIds = storeId ? [storeId] : getManageableStoreContext(req).storeIds;
+    }
+
     const targetUserId = req.user!.role === 'admin' ? (user_id ? parseInt(user_id as string) : undefined) : req.user!.userId;
-    const payroll = calculatePayroll(start_date as string, end_date as string, targetUserId);
+    const payroll = calculatePayroll(start_date as string, end_date as string, targetUserId, storeIds);
 
     res.json(payroll);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Get payroll error:', error);
-    res.status(500).json({ error: 'Failed to get payroll' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get payroll' });
   }
 });
 
@@ -161,7 +172,9 @@ router.get('/export', authenticate, requireAdmin, async (req: AuthRequest, res) 
   }
 
   try {
-    const payroll = calculatePayroll(start_date as string, end_date as string);
+    const storeId = requireManageableStore(req, req.query.store_id);
+    const storeIds = storeId ? [storeId] : getManageableStoreContext(req).storeIds;
+    const payroll = calculatePayroll(start_date as string, end_date as string, undefined, storeIds);
 
     if (exportFormat === 'csv') {
       // CSV 导出
@@ -248,9 +261,9 @@ router.get('/export', authenticate, requireAdmin, async (req: AuthRequest, res) 
       await workbook.xlsx.write(res);
       res.end();
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Export payroll error:', error);
-    res.status(500).json({ error: 'Failed to export payroll' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to export payroll' });
   }
 });
 

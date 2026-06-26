@@ -5,6 +5,7 @@ import db from '../db';
 import { config } from '../config';
 import { User } from '../models/types';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { getStoreIdsForUser, normalizeAdminScope } from '../utils/storeAccess';
 
 const router = Router();
 
@@ -34,7 +35,10 @@ router.post('/login', (req, res) => {
       {
         userId: user.id,
         username: user.username,
+        name: user.name,
         role: user.role,
+        admin_scope: normalizeAdminScope(user.role, user.admin_scope),
+        primary_store_id: user.primary_store_id,
       },
       config.jwtSecret,
       { expiresIn: '7d' }
@@ -47,6 +51,10 @@ router.post('/login', (req, res) => {
         username: user.username,
         name: user.name,
         role: user.role,
+        admin_scope: normalizeAdminScope(user.role, user.admin_scope),
+        primary_store_id: user.primary_store_id,
+        support_store_ids: getStoreIdsForUser(user.id, 'support'),
+        managed_store_ids: getStoreIdsForUser(user.id, 'manage'),
       },
     });
   } catch (error) {
@@ -58,14 +66,25 @@ router.post('/login', (req, res) => {
 // 获取当前用户信息
 router.get('/me', authenticate, (req: AuthRequest, res) => {
   try {
-    const user = db.prepare('SELECT id, username, name, role, hourly_rate, status FROM users WHERE id = ?')
+    const user = db.prepare(`
+      SELECT u.id, u.username, u.name, u.role, u.admin_scope, u.primary_store_id,
+             s.name as primary_store_name, u.hourly_rate, u.status
+      FROM users u
+      LEFT JOIN stores s ON u.primary_store_id = s.id
+      WHERE u.id = ?
+    `)
       .get(req.user!.userId) as Omit<User, 'password_hash'> | undefined;
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json(user);
+    res.json({
+      ...user,
+      admin_scope: normalizeAdminScope(user.role, user.admin_scope),
+      support_store_ids: getStoreIdsForUser(user.id, 'support'),
+      managed_store_ids: getStoreIdsForUser(user.id, 'manage'),
+    });
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ error: 'Failed to get user info' });
@@ -74,7 +93,7 @@ router.get('/me', authenticate, (req: AuthRequest, res) => {
 
 // 注册新用户
 router.post('/register', (req, res) => {
-  const { username, password, name, role = 'employee', hourly_rate = 50.0 } = req.body;
+  const { username, password, name, role = 'employee', hourly_rate = 50.0, primary_store_id = 1 } = req.body;
 
   // 验证必填字段
   if (!username || !password || !name) {
@@ -110,17 +129,23 @@ router.post('/register', (req, res) => {
 
     // 插入新用户
     const result = db.prepare(
-      'INSERT INTO users (username, password_hash, name, role, hourly_rate, status) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(username, password_hash, name, role, hourly_rate, 'active');
+      'INSERT INTO users (username, password_hash, name, role, admin_scope, primary_store_id, hourly_rate, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(username, password_hash, name, role, role === 'admin' ? 'store' : 'none', primary_store_id, hourly_rate, 'active');
 
     const newUserId = result.lastInsertRowid;
+    db.prepare(
+      'INSERT OR IGNORE INTO user_store_access (user_id, store_id, access_type) VALUES (?, ?, ?)'
+    ).run(newUserId, primary_store_id, role === 'admin' ? 'manage' : 'support');
 
     // 生成token
     const token = jwt.sign(
       {
         userId: newUserId,
         username: username,
+        name: name,
         role: role,
+        admin_scope: role === 'admin' ? 'store' : 'none',
+        primary_store_id,
       },
       config.jwtSecret,
       { expiresIn: '7d' }
@@ -133,6 +158,8 @@ router.post('/register', (req, res) => {
         username: username,
         name: name,
         role: role,
+        admin_scope: role === 'admin' ? 'store' : 'none',
+        primary_store_id,
       },
     });
   } catch (error) {

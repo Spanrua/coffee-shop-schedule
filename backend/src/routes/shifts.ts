@@ -1,38 +1,65 @@
 import { Router } from 'express';
 import db from '../db';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
-import { Shift, AvailableTime, ShiftRequirement, User } from '../models/types';
+import { Shift, ShiftRequirement } from '../models/types';
 import { addDays, format, parse, parseISO } from 'date-fns';
+import {
+  buildStoreFilter,
+  getManageableStoreContext,
+  parseRequestedStoreId,
+  requireManageableStore,
+} from '../utils/storeAccess';
 
 const router = Router();
 
-// 自动生成排班（管理员）
-router.post('/generate', authenticate, requireAdmin, (req: AuthRequest, res) => {
-  const { week_start_date } = req.body;
+function userCanWorkStore(userId: number, storeId: number): boolean {
+  const row = db.prepare(`
+    SELECT 1
+    FROM users u
+    LEFT JOIN user_store_access usa
+      ON usa.user_id = u.id AND usa.store_id = ? AND usa.access_type = 'support'
+    WHERE u.id = ? AND (u.primary_store_id = ? OR usa.id IS NOT NULL)
+  `).get(storeId, userId, storeId);
 
-  if (!week_start_date) {
-    return res.status(400).json({ error: 'week_start_date is required' });
+  return !!row;
+}
+
+function getShiftStoreId(shiftId: number): number | undefined {
+  const shift = db.prepare('SELECT store_id FROM shifts WHERE id = ?').get(shiftId) as { store_id: number } | undefined;
+  return shift?.store_id;
+}
+
+router.post('/generate', authenticate, requireAdmin, (req: AuthRequest, res) => {
+  const { week_start_date, store_id } = req.body;
+
+  if (!week_start_date || !store_id) {
+    return res.status(400).json({ error: 'week_start_date and store_id are required' });
   }
 
   try {
-    // 1. 获取该周所有员工的可用时间
+    const storeId = requireManageableStore(req, store_id);
+    if (!storeId) {
+      return res.status(400).json({ error: 'store_id is required' });
+    }
+
     const availableTimes = db.prepare(`
       SELECT at.*, u.hourly_rate, u.name
       FROM available_times at
       JOIN users u ON at.user_id = u.id
-      WHERE at.week_start_date = ? AND u.status = 'active' AND u.role = 'employee'
+      WHERE at.week_start_date = ? AND at.store_id = ? AND u.status = 'active' AND u.role = 'employee'
       ORDER BY at.day_of_week, at.start_time
-    `).all(week_start_date) as any[];
+    `).all(week_start_date, storeId) as any[];
 
-    // 2. 获取班次需求配置
-    const requirements = db.prepare('SELECT * FROM shift_requirements ORDER BY day_of_week, time_slot_start')
-      .all() as ShiftRequirement[];
+    const requirements = db.prepare(`
+      SELECT * FROM shift_requirements
+      WHERE store_id = ?
+      ORDER BY day_of_week, time_slot_start
+    `).all(storeId) as ShiftRequirement[];
 
     if (requirements.length === 0) {
-      return res.status(400).json({ error: 'No shift requirements configured' });
+      return res.status(400).json({ error: 'No shift requirements configured for this store' });
     }
 
-    // 3. 计算每个员工本周已有的排班工时（用于公平分配）
     const weekStart = parseISO(week_start_date);
     const weekEnd = addDays(weekStart, 6);
 
@@ -40,16 +67,15 @@ router.post('/generate', authenticate, requireAdmin, (req: AuthRequest, res) => 
       SELECT user_id,
         SUM((julianday(date || ' ' || end_time) - julianday(date || ' ' || start_time)) * 24) as total_hours
       FROM shifts
-      WHERE date BETWEEN ? AND ? AND status != 'cancelled'
+      WHERE store_id = ? AND date BETWEEN ? AND ? AND status != 'cancelled'
       GROUP BY user_id
-    `).all(format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')) as any[];
+    `).all(storeId, format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd')) as any[];
 
     const userHours: { [key: number]: number } = {};
-    existingShifts.forEach((s: any) => {
-      userHours[s.user_id] = s.total_hours || 0;
+    existingShifts.forEach((shift: any) => {
+      userHours[shift.user_id] = shift.total_hours || 0;
     });
 
-    // 4. 为每一天的每个时间槽分配员工
     const generatedShifts: any[] = [];
     const warnings: string[] = [];
 
@@ -57,32 +83,26 @@ router.post('/generate', authenticate, requireAdmin, (req: AuthRequest, res) => 
       const currentDate = addDays(weekStart, dayOffset);
       const dateStr = format(currentDate, 'yyyy-MM-dd');
       const dayOfWeek = currentDate.getDay();
-
-      // 获取这一天的班次需求
-      const dayRequirements = requirements.filter(r => r.day_of_week === dayOfWeek);
+      const dayRequirements = requirements.filter((requirement) => requirement.day_of_week === dayOfWeek);
 
       for (const requirement of dayRequirements) {
-        // 找出可以在这个时段工作的员工
-        const eligibleEmployees = availableTimes.filter(at => {
-          if (at.day_of_week !== dayOfWeek) return false;
+        const eligibleEmployees = availableTimes.filter((availableTime) => {
+          if (availableTime.day_of_week !== dayOfWeek) return false;
 
-          // 检查可用时间是否覆盖班次时间
-          const atStart = parse(at.start_time, 'HH:mm', new Date());
-          const atEnd = parse(at.end_time, 'HH:mm', new Date());
+          const atStart = parse(availableTime.start_time, 'HH:mm', new Date());
+          const atEnd = parse(availableTime.end_time, 'HH:mm', new Date());
           const reqStart = parse(requirement.time_slot_start, 'HH:mm', new Date());
           const reqEnd = parse(requirement.time_slot_end, 'HH:mm', new Date());
 
           return atStart <= reqStart && atEnd >= reqEnd;
         });
 
-        // 按当前工时排序（工时少的优先）
         eligibleEmployees.sort((a, b) => {
           const hoursA = userHours[a.user_id] || 0;
           const hoursB = userHours[b.user_id] || 0;
           return hoursA - hoursB;
         });
 
-        // 分配员工
         const assignedCount = Math.min(requirement.min_employees, eligibleEmployees.length);
 
         if (assignedCount < requirement.min_employees) {
@@ -93,39 +113,35 @@ router.post('/generate', authenticate, requireAdmin, (req: AuthRequest, res) => 
 
         for (let i = 0; i < assignedCount; i++) {
           const employee = eligibleEmployees[i];
-
-          // 计算这个班次的工时
           const shiftStart = parse(requirement.time_slot_start, 'HH:mm', new Date());
           const shiftEnd = parse(requirement.time_slot_end, 'HH:mm', new Date());
           const shiftHours = (shiftEnd.getTime() - shiftStart.getTime()) / (1000 * 60 * 60);
 
           generatedShifts.push({
             user_id: employee.user_id,
+            store_id: storeId,
             date: dateStr,
             start_time: requirement.time_slot_start,
             end_time: requirement.time_slot_end,
             status: 'scheduled',
           });
 
-          // 更新工时计数
           userHours[employee.user_id] = (userHours[employee.user_id] || 0) + shiftHours;
         }
       }
     }
 
-    // 5. 删除该周已有的排班（如果有）
-    db.prepare('DELETE FROM shifts WHERE date BETWEEN ? AND ?')
-      .run(format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd'));
+    db.prepare('DELETE FROM shifts WHERE store_id = ? AND date BETWEEN ? AND ?')
+      .run(storeId, format(weekStart, 'yyyy-MM-dd'), format(weekEnd, 'yyyy-MM-dd'));
 
-    // 6. 批量插入新排班
     if (generatedShifts.length > 0) {
       const insertStmt = db.prepare(
-        'INSERT INTO shifts (user_id, date, start_time, end_time, status) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO shifts (user_id, store_id, date, start_time, end_time, status) VALUES (?, ?, ?, ?, ?, ?)'
       );
 
       const insertMany = db.transaction((shifts: any[]) => {
         for (const shift of shifts) {
-          insertStmt.run(shift.user_id, shift.date, shift.start_time, shift.end_time, shift.status);
+          insertStmt.run(shift.user_id, shift.store_id, shift.date, shift.start_time, shift.end_time, shift.status);
         }
       });
 
@@ -137,24 +153,45 @@ router.post('/generate', authenticate, requireAdmin, (req: AuthRequest, res) => 
       shifts_count: generatedShifts.length,
       warnings: warnings.length > 0 ? warnings : undefined,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Generate shifts error:', error);
-    res.status(500).json({ error: 'Failed to generate shifts' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to generate shifts' });
   }
 });
 
-// 查询排班
 router.get('/', authenticate, (req: AuthRequest, res) => {
   const { start_date, end_date, user_id } = req.query;
 
   try {
     let query = `
-      SELECT s.*, u.name as user_name, u.username
+      SELECT s.*, u.name as user_name, u.username, st.name as store_name
       FROM shifts s
       JOIN users u ON s.user_id = u.id
+      JOIN stores st ON s.store_id = st.id
       WHERE 1=1
     `;
     const params: any[] = [];
+
+    if (req.user!.role === 'admin') {
+      const storeId = requireManageableStore(req, req.query.store_id);
+      if (storeId) {
+        query += ' AND s.store_id = ?';
+        params.push(storeId);
+      } else {
+        const filter = buildStoreFilter('s', getManageableStoreContext(req).storeIds);
+        query += filter.clause;
+        params.push(...filter.params);
+      }
+    } else {
+      query += ' AND s.user_id = ?';
+      params.push(req.user!.userId);
+
+      const storeId = parseRequestedStoreId(req.query.store_id);
+      if (storeId && !Number.isNaN(storeId)) {
+        query += ' AND s.store_id = ?';
+        params.push(storeId);
+      }
+    }
 
     if (start_date) {
       query += ' AND s.date >= ?';
@@ -174,30 +211,39 @@ router.get('/', authenticate, (req: AuthRequest, res) => {
     const shifts = db.prepare(query).all(...params) as any[];
 
     res.json(shifts);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Get shifts error:', error);
-    res.status(500).json({ error: 'Failed to get shifts' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get shifts' });
   }
 });
 
-// 获取我的排班
 router.get('/my', authenticate, (req: AuthRequest, res) => {
   const { start_date, end_date } = req.query;
+  const storeId = parseRequestedStoreId(req.query.store_id);
 
   try {
-    let query = 'SELECT * FROM shifts WHERE user_id = ?';
+    let query = `
+      SELECT s.*, st.name as store_name
+      FROM shifts s
+      JOIN stores st ON s.store_id = st.id
+      WHERE s.user_id = ?
+    `;
     const params: any[] = [req.user!.userId];
 
+    if (storeId && !Number.isNaN(storeId)) {
+      query += ' AND s.store_id = ?';
+      params.push(storeId);
+    }
     if (start_date) {
-      query += ' AND date >= ?';
+      query += ' AND s.date >= ?';
       params.push(start_date);
     }
     if (end_date) {
-      query += ' AND date <= ?';
+      query += ' AND s.date <= ?';
       params.push(end_date);
     }
 
-    query += ' ORDER BY date, start_time';
+    query += ' ORDER BY s.date, s.start_time';
 
     const shifts = db.prepare(query).all(...params) as Shift[];
 
@@ -208,58 +254,95 @@ router.get('/my', authenticate, (req: AuthRequest, res) => {
   }
 });
 
-// 获取今日排班
 router.get('/today', authenticate, (req: AuthRequest, res) => {
   const today = format(new Date(), 'yyyy-MM-dd');
 
   try {
-    const shifts = db.prepare(`
-      SELECT s.*, u.name as user_name, u.username
+    let query = `
+      SELECT s.*, u.name as user_name, u.username, st.name as store_name
       FROM shifts s
       JOIN users u ON s.user_id = u.id
+      JOIN stores st ON s.store_id = st.id
       WHERE s.date = ?
-      ORDER BY s.start_time, u.name
-    `).all(today) as any[];
+    `;
+    const params: any[] = [today];
+
+    if (req.user!.role === 'admin') {
+      const storeId = requireManageableStore(req, req.query.store_id);
+      if (storeId) {
+        query += ' AND s.store_id = ?';
+        params.push(storeId);
+      } else {
+        const filter = buildStoreFilter('s', getManageableStoreContext(req).storeIds);
+        query += filter.clause;
+        params.push(...filter.params);
+      }
+    } else {
+      query += ' AND s.user_id = ?';
+      params.push(req.user!.userId);
+    }
+
+    query += ' ORDER BY s.start_time, u.name';
+    const shifts = db.prepare(query).all(...params) as any[];
 
     res.json(shifts);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Get today shifts error:', error);
-    res.status(500).json({ error: 'Failed to get today shifts' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get today shifts' });
   }
 });
 
-// 手动创建班次（管理员）
 router.post('/', authenticate, requireAdmin, (req: AuthRequest, res) => {
-  const { user_id, date, start_time, end_time, notes } = req.body;
+  const { user_id, store_id, date, start_time, end_time, notes } = req.body;
 
-  if (!user_id || !date || !start_time || !end_time) {
+  if (!user_id || !store_id || !date || !start_time || !end_time) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
   try {
-    const result = db.prepare(
-      'INSERT INTO shifts (user_id, date, start_time, end_time, notes, status) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(user_id, date, start_time, end_time, notes || null, 'scheduled');
+    const storeId = requireManageableStore(req, store_id);
+    if (!storeId) {
+      return res.status(400).json({ error: 'store_id is required' });
+    }
+    if (!userCanWorkStore(Number(user_id), storeId)) {
+      return res.status(400).json({ error: 'Employee cannot work in this store' });
+    }
 
-    const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(result.lastInsertRowid) as Shift;
+    const result = db.prepare(
+      'INSERT INTO shifts (user_id, store_id, date, start_time, end_time, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(user_id, storeId, date, start_time, end_time, notes || null, 'scheduled');
+
+    const shift = db.prepare(`
+      SELECT s.*, st.name as store_name
+      FROM shifts s
+      JOIN stores st ON s.store_id = st.id
+      WHERE s.id = ?
+    `).get(result.lastInsertRowid) as Shift;
 
     res.status(201).json(shift);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Create shift error:', error);
-    res.status(500).json({ error: 'Failed to create shift' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to create shift' });
   }
 });
 
-// 更新班次（管理员）
 router.put('/:id', authenticate, requireAdmin, (req: AuthRequest, res) => {
   const { id } = req.params;
-  const { user_id, date, start_time, end_time, status, notes } = req.body;
+  const { user_id, store_id, date, start_time, end_time, status, notes } = req.body;
+  const shiftId = Number(id);
 
   try {
-    const shift = db.prepare('SELECT id FROM shifts WHERE id = ?').get(id);
+    const currentStoreId = getShiftStoreId(shiftId);
 
-    if (!shift) {
+    if (!currentStoreId) {
       return res.status(404).json({ error: 'Shift not found' });
+    }
+
+    requireManageableStore(req, currentStoreId);
+    const nextStoreId = store_id !== undefined ? requireManageableStore(req, store_id) : currentStoreId;
+
+    if (user_id !== undefined && nextStoreId && !userCanWorkStore(Number(user_id), nextStoreId)) {
+      return res.status(400).json({ error: 'Employee cannot work in this store' });
     }
 
     let query = 'UPDATE shifts SET updated_at = CURRENT_TIMESTAMP';
@@ -268,6 +351,10 @@ router.put('/:id', authenticate, requireAdmin, (req: AuthRequest, res) => {
     if (user_id !== undefined) {
       query += ', user_id = ?';
       params.push(user_id);
+    }
+    if (nextStoreId !== currentStoreId) {
+      query += ', store_id = ?';
+      params.push(nextStoreId);
     }
     if (date !== undefined) {
       query += ', date = ?';
@@ -291,24 +378,34 @@ router.put('/:id', authenticate, requireAdmin, (req: AuthRequest, res) => {
     }
 
     query += ' WHERE id = ?';
-    params.push(id);
+    params.push(shiftId);
 
     db.prepare(query).run(...params);
 
-    const updatedShift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(id) as Shift;
+    const updatedShift = db.prepare(`
+      SELECT s.*, st.name as store_name
+      FROM shifts s
+      JOIN stores st ON s.store_id = st.id
+      WHERE s.id = ?
+    `).get(shiftId) as Shift;
 
     res.json(updatedShift);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Update shift error:', error);
-    res.status(500).json({ error: 'Failed to update shift' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update shift' });
   }
 });
 
-// 删除班次（管理员）
 router.delete('/:id', authenticate, requireAdmin, (req: AuthRequest, res) => {
   const { id } = req.params;
 
   try {
+    const storeId = getShiftStoreId(Number(id));
+    if (!storeId) {
+      return res.status(404).json({ error: 'Shift not found' });
+    }
+    requireManageableStore(req, storeId);
+
     const result = db.prepare('DELETE FROM shifts WHERE id = ?').run(id);
 
     if (result.changes === 0) {
@@ -316,9 +413,9 @@ router.delete('/:id', authenticate, requireAdmin, (req: AuthRequest, res) => {
     }
 
     res.json({ message: 'Shift deleted successfully' });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Delete shift error:', error);
-    res.status(500).json({ error: 'Failed to delete shift' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete shift' });
   }
 });
 

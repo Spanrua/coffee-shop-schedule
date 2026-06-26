@@ -6,12 +6,24 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const db_1 = __importDefault(require("../db"));
 const auth_1 = require("../middleware/auth");
+const storeAccess_1 = require("../utils/storeAccess");
 const router = (0, express_1.Router)();
-// 获取班次需求配置
 router.get('/shift-requirements', auth_1.authenticate, (req, res) => {
     try {
-        const requirements = db_1.default.prepare('SELECT * FROM shift_requirements ORDER BY day_of_week, time_slot_start')
-            .all();
+        let query = 'SELECT * FROM shift_requirements WHERE 1=1';
+        const params = [];
+        const storeId = (0, storeAccess_1.parseRequestedStoreId)(req.query.store_id);
+        if (storeId && !Number.isNaN(storeId)) {
+            query += ' AND store_id = ?';
+            params.push(storeId);
+        }
+        else if (req.user.role === 'admin') {
+            const filter = (0, storeAccess_1.buildStoreFilter)('shift_requirements', (0, storeAccess_1.getManageableStoreContext)(req).storeIds);
+            query += filter.clause;
+            params.push(...filter.params);
+        }
+        query += ' ORDER BY store_id, day_of_week, time_slot_start';
+        const requirements = db_1.default.prepare(query).all(...params);
         res.json(requirements);
     }
     catch (error) {
@@ -19,20 +31,21 @@ router.get('/shift-requirements', auth_1.authenticate, (req, res) => {
         res.status(500).json({ error: 'Failed to get shift requirements' });
     }
 });
-// 更新班次需求配置（管理员）
 router.put('/shift-requirements', auth_1.authenticate, auth_1.requireAdmin, (req, res) => {
-    const { requirements } = req.body;
-    if (!Array.isArray(requirements)) {
-        return res.status(400).json({ error: 'Invalid request data' });
+    const { store_id, requirements } = req.body;
+    if (!store_id || !Array.isArray(requirements)) {
+        return res.status(400).json({ error: 'store_id and requirements are required' });
     }
     try {
-        // 删除旧配置
-        db_1.default.prepare('DELETE FROM shift_requirements').run();
-        // 插入新配置
-        const insertStmt = db_1.default.prepare('INSERT INTO shift_requirements (day_of_week, time_slot_start, time_slot_end, min_employees) VALUES (?, ?, ?, ?)');
+        const storeId = (0, storeAccess_1.requireManageableStore)(req, store_id);
+        if (!storeId) {
+            return res.status(400).json({ error: 'store_id is required' });
+        }
+        db_1.default.prepare('DELETE FROM shift_requirements WHERE store_id = ?').run(storeId);
+        const insertStmt = db_1.default.prepare('INSERT INTO shift_requirements (store_id, day_of_week, time_slot_start, time_slot_end, min_employees) VALUES (?, ?, ?, ?, ?)');
         const insertMany = db_1.default.transaction((reqs) => {
-            for (const req of reqs) {
-                insertStmt.run(req.day_of_week, req.time_slot_start, req.time_slot_end, req.min_employees);
+            for (const requirement of reqs) {
+                insertStmt.run(storeId, requirement.day_of_week, requirement.time_slot_start, requirement.time_slot_end, requirement.min_employees);
             }
         });
         insertMany(requirements);
@@ -40,10 +53,9 @@ router.put('/shift-requirements', auth_1.authenticate, auth_1.requireAdmin, (req
     }
     catch (error) {
         console.error('Update shift requirements error:', error);
-        res.status(500).json({ error: 'Failed to update shift requirements' });
+        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to update shift requirements' });
     }
 });
-// 获取系统设置
 router.get('/settings', auth_1.authenticate, (req, res) => {
     try {
         const settings = db_1.default.prepare('SELECT * FROM system_settings ORDER BY setting_key')
@@ -55,7 +67,6 @@ router.get('/settings', auth_1.authenticate, (req, res) => {
         res.status(500).json({ error: 'Failed to get settings' });
     }
 });
-// 更新系统设置（管理员）
 router.put('/settings', auth_1.authenticate, auth_1.requireAdmin, (req, res) => {
     const { settings } = req.body;
     if (!Array.isArray(settings)) {

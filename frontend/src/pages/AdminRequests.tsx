@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { FileText, CheckCircle, XCircle, AlertCircle, Clock, User, ChevronLeft } from 'lucide-react';
+import api from '../services/api';
 import type { ShiftChangeRequest } from '../types';
 
 export default function AdminRequests() {
@@ -20,20 +21,10 @@ export default function AdminRequests() {
   const fetchRequests = async () => {
     setLoading(true);
     try {
-      const url = filter === 'all'
-        ? '/api/requests/all'
-        : `/api/requests/all?status=${filter}`;
-
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
+      const response = await api.get('/requests/all', {
+        params: filter === 'all' ? {} : { status: filter },
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setRequests(data);
-      }
+      setRequests(response.data);
     } catch (error) {
       console.error('Failed to fetch requests:', error);
     } finally {
@@ -46,30 +37,18 @@ export default function AdminRequests() {
 
     try {
       const endpoint = approvalAction === 'approve' ? 'approve' : 'reject';
-      const response = await fetch(`/api/requests/${selectedRequest.id}/${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          admin_notes: adminNotes || null,
-        }),
+      await api.post(`/requests/${selectedRequest.id}/${endpoint}`, {
+        admin_notes: adminNotes || null,
       });
 
-      if (response.ok) {
-        alert(approvalAction === 'approve' ? '申请已批准' : '申请已拒绝');
-        setShowApprovalModal(false);
-        setSelectedRequest(null);
-        setAdminNotes('');
-        await fetchRequests();
-      } else {
-        const error = await response.json();
-        alert(`操作失败：${error.error}`);
-      }
-    } catch (error) {
+      alert(approvalAction === 'approve' ? '申请已批准' : '申请已拒绝');
+      setShowApprovalModal(false);
+      setSelectedRequest(null);
+      setAdminNotes('');
+      await fetchRequests();
+    } catch (error: any) {
       console.error('Approval failed:', error);
-      alert('操作失败，请重试');
+      alert(error.response?.data?.error || '操作失败，请重试');
     }
   };
 

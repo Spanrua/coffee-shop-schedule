@@ -14,6 +14,7 @@ import payrollRoutes from './routes/payroll';
 import configRoutes from './routes/config';
 import requestsRoutes from './routes/requests';
 import notificationsRoutes from './routes/notifications';
+import storesRoutes from './routes/stores';
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use('/api/payroll', payrollRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/requests', requestsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/stores', storesRoutes);
 
 // Error handler
 app.use(errorHandler);

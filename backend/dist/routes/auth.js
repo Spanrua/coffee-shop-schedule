@@ -9,6 +9,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const db_1 = __importDefault(require("../db"));
 const config_1 = require("../config");
 const auth_1 = require("../middleware/auth");
+const storeAccess_1 = require("../utils/storeAccess");
 const router = (0, express_1.Router)();
 // 登录
 router.post('/login', (req, res) => {
@@ -29,7 +30,10 @@ router.post('/login', (req, res) => {
         const token = jsonwebtoken_1.default.sign({
             userId: user.id,
             username: user.username,
+            name: user.name,
             role: user.role,
+            admin_scope: (0, storeAccess_1.normalizeAdminScope)(user.role, user.admin_scope),
+            primary_store_id: user.primary_store_id,
         }, config_1.config.jwtSecret, { expiresIn: '7d' });
         res.json({
             token,
@@ -38,6 +42,10 @@ router.post('/login', (req, res) => {
                 username: user.username,
                 name: user.name,
                 role: user.role,
+                admin_scope: (0, storeAccess_1.normalizeAdminScope)(user.role, user.admin_scope),
+                primary_store_id: user.primary_store_id,
+                support_store_ids: (0, storeAccess_1.getStoreIdsForUser)(user.id, 'support'),
+                managed_store_ids: (0, storeAccess_1.getStoreIdsForUser)(user.id, 'manage'),
             },
         });
     }
@@ -49,12 +57,23 @@ router.post('/login', (req, res) => {
 // 获取当前用户信息
 router.get('/me', auth_1.authenticate, (req, res) => {
     try {
-        const user = db_1.default.prepare('SELECT id, username, name, role, hourly_rate, status FROM users WHERE id = ?')
+        const user = db_1.default.prepare(`
+      SELECT u.id, u.username, u.name, u.role, u.admin_scope, u.primary_store_id,
+             s.name as primary_store_name, u.hourly_rate, u.status
+      FROM users u
+      LEFT JOIN stores s ON u.primary_store_id = s.id
+      WHERE u.id = ?
+    `)
             .get(req.user.userId);
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-        res.json(user);
+        res.json({
+            ...user,
+            admin_scope: (0, storeAccess_1.normalizeAdminScope)(user.role, user.admin_scope),
+            support_store_ids: (0, storeAccess_1.getStoreIdsForUser)(user.id, 'support'),
+            managed_store_ids: (0, storeAccess_1.getStoreIdsForUser)(user.id, 'manage'),
+        });
     }
     catch (error) {
         console.error('Get user error:', error);
@@ -63,7 +82,7 @@ router.get('/me', auth_1.authenticate, (req, res) => {
 });
 // 注册新用户
 router.post('/register', (req, res) => {
-    const { username, password, name, role = 'employee', hourly_rate = 50.0 } = req.body;
+    const { username, password, name, role = 'employee', hourly_rate = 50.0, primary_store_id = 1 } = req.body;
     // 验证必填字段
     if (!username || !password || !name) {
         return res.status(400).json({ error: 'Username, password, and name are required' });
@@ -90,13 +109,17 @@ router.post('/register', (req, res) => {
         // 加密密码
         const password_hash = bcrypt_1.default.hashSync(password, 10);
         // 插入新用户
-        const result = db_1.default.prepare('INSERT INTO users (username, password_hash, name, role, hourly_rate, status) VALUES (?, ?, ?, ?, ?, ?)').run(username, password_hash, name, role, hourly_rate, 'active');
+        const result = db_1.default.prepare('INSERT INTO users (username, password_hash, name, role, admin_scope, primary_store_id, hourly_rate, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(username, password_hash, name, role, role === 'admin' ? 'store' : 'none', primary_store_id, hourly_rate, 'active');
         const newUserId = result.lastInsertRowid;
+        db_1.default.prepare('INSERT OR IGNORE INTO user_store_access (user_id, store_id, access_type) VALUES (?, ?, ?)').run(newUserId, primary_store_id, role === 'admin' ? 'manage' : 'support');
         // 生成token
         const token = jsonwebtoken_1.default.sign({
             userId: newUserId,
             username: username,
+            name: name,
             role: role,
+            admin_scope: role === 'admin' ? 'store' : 'none',
+            primary_store_id,
         }, config_1.config.jwtSecret, { expiresIn: '7d' });
         res.status(201).json({
             token,
@@ -105,6 +128,8 @@ router.post('/register', (req, res) => {
                 username: username,
                 name: name,
                 role: role,
+                admin_scope: role === 'admin' ? 'store' : 'none',
+                primary_store_id,
             },
         });
     }

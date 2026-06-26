@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { format, startOfWeek, addDays, addWeeks, subWeeks } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react';
+import api from '../services/api';
 import type { Shift } from '../types';
 
 const DAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -23,19 +24,10 @@ export default function EmployeeSchedule() {
   const fetchShifts = async () => {
     setLoading(true);
     try {
-      const response = await fetch(
-        `/api/shifts/my?start_date=${weekStartStr}&end_date=${weekEndStr}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setShifts(data);
-      }
+      const response = await api.get('/shifts/my', {
+        params: { start_date: weekStartStr, end_date: weekEndStr },
+      });
+      setShifts(response.data);
     } catch (error) {
       console.error('Failed to fetch shifts:', error);
     } finally {
@@ -247,6 +239,9 @@ export default function EmployeeSchedule() {
                                     <p className="text-lg font-semibold text-gray-900">
                                       {shift.start_time} - {shift.end_time}
                                     </p>
+                                    {shift.store_name && (
+                                      <p className="text-sm text-blue-600">{shift.store_name}</p>
+                                    )}
                                     <p className="text-sm text-gray-600">
                                       工作时长：{hours.toFixed(1)} 小时
                                     </p>

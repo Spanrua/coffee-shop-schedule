@@ -3,15 +3,28 @@ export interface User {
   username: string;
   name: string;
   role: 'employee' | 'admin';
+  admin_scope?: 'none' | 'store' | 'super';
+  primary_store_id?: number;
+  primary_store_name?: string;
+  support_store_ids?: number[];
+  managed_store_ids?: number[];
   hourly_rate?: number;
   status?: string;
   created_at?: string;
   updated_at?: string;
 }
 
+export interface Store {
+  id: number;
+  name: string;
+  status: 'active' | 'inactive';
+}
+
 export interface AvailableTime {
   id?: number;
   user_id?: number;
+  store_id?: number;
+  store_name?: string;
   week_start_date: string;
   day_of_week: number;
   start_time: string;
@@ -21,6 +34,8 @@ export interface AvailableTime {
 export interface Shift {
   id: number;
   user_id: number;
+  store_id?: number;
+  store_name?: string;
   user_name?: string;
   username?: string;
   date: string;
@@ -34,6 +49,8 @@ export interface ClockRecord {
   id: number;
   shift_id?: number;
   user_id: number;
+  store_id?: number;
+  store_name?: string;
   user_name?: string;
   date: string;
   clock_in_time?: string;
@@ -47,6 +64,7 @@ export interface ClockRecord {
 
 export interface ShiftRequirement {
   id?: number;
+  store_id?: number;
   day_of_week: number;
   time_slot_start: string;
   time_slot_end: string;
@@ -103,6 +121,8 @@ export interface ShiftChangeRequest {
   requester_name?: string;
   requester_username?: string;
   admin_name?: string;
+  store_id?: number;
+  store_name?: string;
 }
 
 export interface Notification {

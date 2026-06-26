@@ -18,6 +18,7 @@ const payroll_1 = __importDefault(require("./routes/payroll"));
 const config_2 = __importDefault(require("./routes/config"));
 const requests_1 = __importDefault(require("./routes/requests"));
 const notifications_1 = __importDefault(require("./routes/notifications"));
+const stores_1 = __importDefault(require("./routes/stores"));
 const app = (0, express_1.default)();
 // Middleware
 app.use((0, cors_1.default)());
@@ -39,6 +40,7 @@ app.use('/api/payroll', payroll_1.default);
 app.use('/api/config', config_2.default);
 app.use('/api/requests', requests_1.default);
 app.use('/api/notifications', notifications_1.default);
+app.use('/api/stores', stores_1.default);
 // Error handler
 app.use(errorHandler_1.errorHandler);
 // Start server
