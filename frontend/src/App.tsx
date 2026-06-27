@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -78,7 +78,7 @@ function IcpFooter() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <AuthProvider>
         <div className="flex min-h-screen flex-col">
           <main className="flex-1">
@@ -87,6 +87,6 @@ export default function App() {
           <IcpFooter />
         </div>
       </AuthProvider>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
