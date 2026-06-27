@@ -72,7 +72,7 @@ export default function EmployeeSchedule() {
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-2">
             <a
-              href="/employee"
+              href="#/employee"
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
               title="返回工作台"
             >

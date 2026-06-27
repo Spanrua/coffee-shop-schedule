@@ -197,35 +197,35 @@ export default function AdminDashboard() {
         {/* 功能菜单 */}
         <div className="mt-8 grid grid-cols-2 md:grid-cols-5 gap-4">
           <a
-            href="/admin/users"
+            href="#/admin/users"
             className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow flex flex-col items-center justify-center text-center"
           >
             <Users className="w-8 h-8 text-blue-600 mb-2" />
             <span className="text-sm font-medium text-gray-900">员工管理</span>
           </a>
           <a
-            href="/admin/scheduling"
+            href="#/admin/scheduling"
             className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow flex flex-col items-center justify-center text-center"
           >
             <Calendar className="w-8 h-8 text-green-600 mb-2" />
             <span className="text-sm font-medium text-gray-900">排班管理</span>
           </a>
           <a
-            href="/admin/requests"
+            href="#/admin/requests"
             className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow flex flex-col items-center justify-center text-center"
           >
             <FileText className="w-8 h-8 text-orange-600 mb-2" />
             <span className="text-sm font-medium text-gray-900">请假审批</span>
           </a>
           <a
-            href="/admin/clock-records"
+            href="#/admin/clock-records"
             className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow flex flex-col items-center justify-center text-center"
           >
             <Clock className="w-8 h-8 text-purple-600 mb-2" />
             <span className="text-sm font-medium text-gray-900">打卡记录</span>
           </a>
           <a
-            href="/admin/payroll"
+            href="#/admin/payroll"
             className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow flex flex-col items-center justify-center text-center"
           >
             <DollarSign className="w-8 h-8 text-yellow-600 mb-2" />

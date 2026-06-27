@@ -229,7 +229,7 @@ export default function EmployeeDashboard() {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">快捷菜单</h2>
               <div className="space-y-2">
                 <a
-                  href="/employee/available-times"
+                  href="#/employee/available-times"
                   className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-blue-50 rounded-lg transition-colors group"
                 >
                   <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 transition-colors">
@@ -241,7 +241,7 @@ export default function EmployeeDashboard() {
                   </div>
                 </a>
                 <a
-                  href="/employee/schedule"
+                  href="#/employee/schedule"
                   className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-green-50 rounded-lg transition-colors group"
                 >
                   <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center group-hover:bg-green-200 transition-colors">
@@ -253,7 +253,7 @@ export default function EmployeeDashboard() {
                   </div>
                 </a>
                 <a
-                  href="/employee/requests"
+                  href="#/employee/requests"
                   className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-orange-50 rounded-lg transition-colors group"
                 >
                   <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center group-hover:bg-orange-200 transition-colors">
@@ -265,7 +265,7 @@ export default function EmployeeDashboard() {
                   </div>
                 </a>
                 <a
-                  href="/employee/clock-records"
+                  href="#/employee/clock-records"
                   className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-purple-50 rounded-lg transition-colors group"
                 >
                   <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-200 transition-colors">
@@ -277,7 +277,7 @@ export default function EmployeeDashboard() {
                   </div>
                 </a>
                 <a
-                  href="/employee/payroll"
+                  href="#/employee/payroll"
                   className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-yellow-50 rounded-lg transition-colors group"
                 >
                   <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center group-hover:bg-yellow-200 transition-colors">
