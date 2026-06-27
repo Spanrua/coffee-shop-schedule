@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/*",
+      "destination": "http://124.220.134.12:3000/api/:splat"
+    }
+  ]
+}
