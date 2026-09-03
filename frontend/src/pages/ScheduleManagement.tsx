@@ -22,7 +22,7 @@ interface ScheduleSlot {
   status?: string;
 }
 
-const DAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 const TIME_SLOTS = [
   '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
   '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
@@ -31,7 +31,7 @@ const TIME_SLOTS = [
 
 export default function ScheduleManagement() {
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() =>
-    startOfWeek(new Date(), { weekStartsOn: 0 })
+    startOfWeek(new Date(), { weekStartsOn: 1 })
   );
   const [availableTimes, setAvailableTimes] = useState<AvailableTimeWithUser[]>([]);
   const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
@@ -237,7 +237,7 @@ export default function ScheduleManagement() {
   };
 
   const goToThisWeek = () => {
-    setCurrentWeekStart(startOfWeek(new Date(), { weekStartsOn: 0 }));
+    setCurrentWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }));
   };
 
   // 获取某个日期和时间段内的排班

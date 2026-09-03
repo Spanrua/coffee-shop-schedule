@@ -284,8 +284,8 @@ export default function EmployeeDashboard() {
                     <DollarSign className="w-5 h-5 text-yellow-600" />
                   </div>
                   <div>
-                    <div className="font-medium text-gray-900">我的工资</div>
-                    <div className="text-xs text-gray-500">查看工资明细和统计</div>
+                    <div className="font-medium text-gray-900">我的工时</div>
+                    <div className="text-xs text-gray-500">查看工时明细和统计</div>
                   </div>
                 </a>
               </div>

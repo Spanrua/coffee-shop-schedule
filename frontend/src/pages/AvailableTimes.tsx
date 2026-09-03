@@ -12,11 +12,12 @@ interface TimeSlot {
   end_time: string;
 }
 
-const DAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+const DISPLAY_DAY_OF_WEEK = [1, 2, 3, 4, 5, 6, 0];
 
 export default function AvailableTimes() {
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() =>
-    startOfWeek(new Date(), { weekStartsOn: 0 })
+    startOfWeek(new Date(), { weekStartsOn: 1 })
   );
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
@@ -150,7 +151,7 @@ export default function AvailableTimes() {
   };
 
   const goToThisWeek = () => {
-    setCurrentWeekStart(startOfWeek(new Date(), { weekStartsOn: 0 }));
+    setCurrentWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }));
   };
 
   // 按星期几分组时间段
@@ -255,7 +256,8 @@ export default function AvailableTimes() {
             {/* 按星期显示时间段 */}
             <div className="space-y-4 mb-6">
               {DAYS.map((dayName, dayIndex) => {
-                const daySlots = slotsByDay[dayIndex] || [];
+                const dayOfWeek = DISPLAY_DAY_OF_WEEK[dayIndex];
+                const daySlots = slotsByDay[dayOfWeek] || [];
                 const currentDate = addDays(currentWeekStart, dayIndex);
 
                 return (
@@ -268,7 +270,7 @@ export default function AvailableTimes() {
                         </p>
                       </div>
                       <button
-                        onClick={() => addTimeSlot(dayIndex)}
+                        onClick={() => addTimeSlot(dayOfWeek)}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                       >
                         <Plus className="w-4 h-4" />
@@ -283,7 +285,7 @@ export default function AvailableTimes() {
                     ) : (
                       <div className="space-y-3">
                         {timeSlots.map((slot, index) => {
-                          if (slot.day_of_week !== dayIndex) return null;
+                          if (slot.day_of_week !== dayOfWeek) return null;
 
                           return (
                             <div key={index} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">

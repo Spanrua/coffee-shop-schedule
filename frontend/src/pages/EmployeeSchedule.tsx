@@ -5,11 +5,11 @@ import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react
 import api from '../services/api';
 import type { Shift } from '../types';
 
-const DAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
 export default function EmployeeSchedule() {
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() =>
-    startOfWeek(new Date(), { weekStartsOn: 0 })
+    startOfWeek(new Date(), { weekStartsOn: 1 })
   );
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(false);
@@ -44,7 +44,7 @@ export default function EmployeeSchedule() {
   };
 
   const goToThisWeek = () => {
-    setCurrentWeekStart(startOfWeek(new Date(), { weekStartsOn: 0 }));
+    setCurrentWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }));
   };
 
   // 按日期分组班次

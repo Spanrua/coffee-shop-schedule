@@ -1,19 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import { DollarSign, ArrowLeft, TrendingUp, Clock } from 'lucide-react';
+import { ArrowLeft, Clock } from 'lucide-react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 
 interface PayrollRecord {
   user_id: number;
   name: string;
   username: string;
-  hourly_rate: number;
   total_hours: number;
-  regular_pay: number;
-  overtime_pay: number;
-  weekend_pay: number;
-  total_pay: number;
   daily_records: DailyRecord[];
 }
 
@@ -24,7 +19,6 @@ interface DailyRecord {
   actual_hours: number;
   is_weekend: boolean;
   is_missing_clock: boolean;
-  daily_pay: number;
 }
 
 export default function EmployeePayroll() {
@@ -48,7 +42,7 @@ export default function EmployeePayroll() {
       setPayrollData(response.data[0] || null);
     } catch (error) {
       console.error('Failed to load payroll:', error);
-      alert('加载工资数据失败');
+      alert('加载工时数据失败');
     } finally {
       setLoading(false);
     }
@@ -97,30 +91,16 @@ export default function EmployeePayroll() {
                 <ArrowLeft className="w-5 h-5" />
                 <span>返回</span>
               </button>
-              <h1 className="text-xl font-bold text-gray-900">我的工资</h1>
+              <h1 className="text-xl font-bold text-gray-900">我的工时</h1>
             </div>
           </div>
         </div>
       </nav>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 统计卡片 */}
+        {/* 工时统计 */}
         {payrollData && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-green-100 rounded-full p-3">
-                  <DollarSign className="w-6 h-6 text-green-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">总工资</p>
-                  <p className="text-2xl font-semibold text-gray-900">
-                    ¥{payrollData.total_pay.toFixed(2)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center">
                 <div className="flex-shrink-0 bg-blue-100 rounded-full p-3">
@@ -129,7 +109,7 @@ export default function EmployeePayroll() {
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-500">总工时</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    {payrollData.total_hours.toFixed(1)}h
+                    {payrollData.total_hours.toFixed(2)} 小时
                   </p>
                 </div>
               </div>
@@ -137,27 +117,13 @@ export default function EmployeePayroll() {
 
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center">
-                <div className="flex-shrink-0 bg-purple-100 rounded-full p-3">
-                  <TrendingUp className="w-6 h-6 text-purple-600" />
+                <div className="flex-shrink-0 bg-green-100 rounded-full p-3">
+                  <Clock className="w-6 h-6 text-blue-600" />
                 </div>
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">时薪</p>
+                  <p className="text-sm font-medium text-gray-500">工作天数</p>
                   <p className="text-2xl font-semibold text-gray-900">
-                    ¥{payrollData.hourly_rate.toFixed(2)}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <div className="flex-shrink-0 bg-orange-100 rounded-full p-3">
-                  <DollarSign className="w-6 h-6 text-orange-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">加班工资</p>
-                  <p className="text-2xl font-semibold text-gray-900">
-                    ¥{payrollData.overtime_pay.toFixed(2)}
+                    {payrollData.daily_records.length} 天
                   </p>
                 </div>
               </div>
@@ -205,34 +171,9 @@ export default function EmployeePayroll() {
           </div>
         </div>
 
-        {/* 工资明细 */}
+        {/* 工作明细 */}
         {payrollData ? (
           <>
-            {/* 工资构成 */}
-            <div className="bg-white rounded-lg shadow p-6 mb-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">工资构成</h2>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="border border-gray-200 rounded-lg p-4">
-                  <div className="text-sm text-gray-500 mb-1">正常工资</div>
-                  <div className="text-xl font-semibold text-gray-900">
-                    ¥{payrollData.regular_pay.toFixed(2)}
-                  </div>
-                </div>
-                <div className="border border-gray-200 rounded-lg p-4">
-                  <div className="text-sm text-gray-500 mb-1">加班工资</div>
-                  <div className="text-xl font-semibold text-orange-600">
-                    ¥{payrollData.overtime_pay.toFixed(2)}
-                  </div>
-                </div>
-                <div className="border border-gray-200 rounded-lg p-4">
-                  <div className="text-sm text-gray-500 mb-1">周末工资</div>
-                  <div className="text-xl font-semibold text-purple-600">
-                    ¥{payrollData.weekend_pay.toFixed(2)}
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {/* 每日明细 */}
             <div className="bg-white rounded-lg shadow overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200">
@@ -256,9 +197,6 @@ export default function EmployeePayroll() {
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         类型
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        当日工资
                       </th>
                     </tr>
                   </thead>
@@ -300,9 +238,6 @@ export default function EmployeePayroll() {
                               </span>
                             )}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-600">
-                            ¥{daily.daily_pay.toFixed(2)}
-                          </td>
                         </tr>
                       ))
                     )}
@@ -317,16 +252,6 @@ export default function EmployeePayroll() {
           </div>
         )}
 
-        {/* 计算说明 */}
-        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="text-sm font-medium text-blue-800 mb-2">工资计算说明</h3>
-          <ul className="text-sm text-blue-700 space-y-1">
-            <li>• 工作日：前8小时按正常时薪（¥{payrollData?.hourly_rate.toFixed(2) || '50.00'}/小时），超过8小时按1.5倍加班费</li>
-            <li>• 周末：全天按1.5倍计算（¥{payrollData ? (payrollData.hourly_rate * 1.5).toFixed(2) : '75.00'}/小时）</li>
-            <li>• 周总工时超过40小时，超出部分额外按2.0倍计算</li>
-            <li>• 如果未打卡但有排班，则按排班时间估算工资（标记为"估算"）</li>
-          </ul>
-        </div>
       </div>
     </div>
   );

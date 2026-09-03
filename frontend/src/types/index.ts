@@ -82,12 +82,9 @@ export interface PayrollRecord {
   user_id: number;
   name: string;
   username: string;
-  hourly_rate: number;
   total_hours: number;
-  regular_pay: number;
-  overtime_pay: number;
-  weekend_pay: number;
-  total_pay: number;
+  hourly_rate?: number;
+  total_pay?: number;
   daily_records: DailyRecord[];
 }
 
@@ -98,7 +95,7 @@ export interface DailyRecord {
   actual_hours: number;
   is_weekend: boolean;
   is_missing_clock: boolean;
-  daily_pay: number;
+  daily_pay?: number;
 }
 
 export interface ShiftChangeRequest {

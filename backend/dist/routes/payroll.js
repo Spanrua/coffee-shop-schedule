@@ -10,19 +10,9 @@ const auth_1 = require("../middleware/auth");
 const date_fns_1 = require("date-fns");
 const storeAccess_1 = require("../utils/storeAccess");
 const router = (0, express_1.Router)();
-// 计算工资
-function calculatePayroll(startDate, endDate, userId, storeIds) {
-    // 获取系统配置
-    const settings = db_1.default.prepare('SELECT setting_key, setting_value FROM system_settings').all();
-    const config = {};
-    settings.forEach(s => {
-        config[s.setting_key] = parseFloat(s.setting_value) || s.setting_value;
-    });
-    const overtimeDailyThreshold = config.overtime_daily_threshold || 8;
-    const overtimeDailyMultiplier = config.overtime_daily_multiplier || 1.5;
-    const overtimeWeeklyThreshold = config.overtime_weekly_threshold || 40;
-    const overtimeWeeklyMultiplier = config.overtime_weekly_multiplier || 2.0;
-    const weekendMultiplier = config.weekend_multiplier || 1.5;
+// 统计工时。没有完整打卡但存在排班时，使用排班时段估算工时。
+// 管理员请求额外返回工资，工资只按总工时乘以个人时薪计算。
+function calculatePayroll(startDate, endDate, userId, storeIds, includePay = false) {
     // 获取打卡记录
     let query = `
     SELECT cr.*, u.id as user_id, u.name, u.username, u.hourly_rate,
@@ -47,18 +37,20 @@ function calculatePayroll(startDate, endDate, userId, storeIds) {
     const userPayroll = {};
     records.forEach(record => {
         if (!userPayroll[record.user_id]) {
-            userPayroll[record.user_id] = {
+            const user = {
                 user_id: record.user_id,
                 name: record.name,
                 username: record.username,
-                hourly_rate: record.hourly_rate,
                 daily_records: [],
                 total_hours: 0,
-                regular_pay: 0,
-                overtime_pay: 0,
-                weekend_pay: 0,
-                total_pay: 0,
+                ...(includePay
+                    ? {
+                        hourly_rate: Number(record.hourly_rate) || 0,
+                        total_pay: 0,
+                    }
+                    : {}),
             };
+            userPayroll[record.user_id] = user;
         }
         // 计算实际工作时间
         let actualHours = 0;
@@ -78,31 +70,6 @@ function calculatePayroll(startDate, endDate, userId, storeIds) {
         if (actualHours > 0) {
             const dayOfWeek = (0, date_fns_1.getDay)((0, date_fns_1.parseISO)(record.date));
             const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-            let dailyPay = 0;
-            let regularHours = 0;
-            let overtimeHours = 0;
-            if (isWeekend) {
-                // 周末全部按倍数计算
-                dailyPay = actualHours * record.hourly_rate * weekendMultiplier;
-                userPayroll[record.user_id].weekend_pay += dailyPay;
-            }
-            else {
-                // 工作日：前8小时正常，超过8小时按加班计算
-                if (actualHours <= overtimeDailyThreshold) {
-                    regularHours = actualHours;
-                    dailyPay = actualHours * record.hourly_rate;
-                    userPayroll[record.user_id].regular_pay += dailyPay;
-                }
-                else {
-                    regularHours = overtimeDailyThreshold;
-                    overtimeHours = actualHours - overtimeDailyThreshold;
-                    const regularPay = regularHours * record.hourly_rate;
-                    const overtimePay = overtimeHours * record.hourly_rate * overtimeDailyMultiplier;
-                    dailyPay = regularPay + overtimePay;
-                    userPayroll[record.user_id].regular_pay += regularPay;
-                    userPayroll[record.user_id].overtime_pay += overtimePay;
-                }
-            }
             userPayroll[record.user_id].daily_records.push({
                 date: record.date,
                 clock_in_time: record.clock_in_time,
@@ -110,23 +77,23 @@ function calculatePayroll(startDate, endDate, userId, storeIds) {
                 actual_hours: actualHours,
                 is_weekend: isWeekend,
                 is_missing_clock: isMissingClock,
-                daily_pay: dailyPay,
+                ...(includePay
+                    ? {
+                        daily_pay: actualHours * (Number(record.hourly_rate) || 0),
+                    }
+                    : {}),
             });
             userPayroll[record.user_id].total_hours += actualHours;
         }
     });
-    // 计算周总工时加班费
-    Object.values(userPayroll).forEach((user) => {
-        if (user.total_hours > overtimeWeeklyThreshold) {
-            const weeklyOvertimeHours = user.total_hours - overtimeWeeklyThreshold;
-            const weeklyOvertimePay = weeklyOvertimeHours * user.hourly_rate * (overtimeWeeklyMultiplier - 1);
-            user.overtime_pay += weeklyOvertimePay;
-        }
-        user.total_pay = user.regular_pay + user.overtime_pay + user.weekend_pay;
-    });
+    if (includePay) {
+        Object.values(userPayroll).forEach((user) => {
+            user.total_pay = user.total_hours * user.hourly_rate;
+        });
+    }
     return Object.values(userPayroll);
 }
-// 查询工资数据
+// 查询工时数据
 router.get('/', auth_1.authenticate, (req, res) => {
     const { start_date, end_date, user_id } = req.query;
     if (!start_date || !end_date) {
@@ -139,7 +106,7 @@ router.get('/', auth_1.authenticate, (req, res) => {
             storeIds = storeId ? [storeId] : (0, storeAccess_1.getManageableStoreContext)(req).storeIds;
         }
         const targetUserId = req.user.role === 'admin' ? (user_id ? parseInt(user_id) : undefined) : req.user.userId;
-        const payroll = calculatePayroll(start_date, end_date, targetUserId, storeIds);
+        const payroll = calculatePayroll(start_date, end_date, targetUserId, storeIds, req.user.role === 'admin');
         res.json(payroll);
     }
     catch (error) {
@@ -147,7 +114,7 @@ router.get('/', auth_1.authenticate, (req, res) => {
         res.status(error.statusCode || 500).json({ error: error.message || 'Failed to get payroll' });
     }
 });
-// 导出工资表
+// 导出工时表
 router.get('/export', auth_1.authenticate, auth_1.requireAdmin, async (req, res) => {
     const { start_date, end_date, format: exportFormat } = req.query;
     if (!start_date || !end_date) {
@@ -156,19 +123,19 @@ router.get('/export', auth_1.authenticate, auth_1.requireAdmin, async (req, res)
     try {
         const storeId = (0, storeAccess_1.requireManageableStore)(req, req.query.store_id);
         const storeIds = storeId ? [storeId] : (0, storeAccess_1.getManageableStoreContext)(req).storeIds;
-        const payroll = calculatePayroll(start_date, end_date, undefined, storeIds);
+        const payroll = calculatePayroll(start_date, end_date, undefined, storeIds, true);
         if (exportFormat === 'csv') {
             // CSV 导出
-            let csv = '姓名,用户名,时薪,总工时,正常工资,加班工资,周末工资,总工资\n';
+            let csv = '姓名,用户名,时薪,总工时,应发工资\n';
             payroll.forEach((user) => {
-                csv += `${user.name},${user.username},${user.hourly_rate},${user.total_hours.toFixed(2)},${user.regular_pay.toFixed(2)},${user.overtime_pay.toFixed(2)},${user.weekend_pay.toFixed(2)},${user.total_pay.toFixed(2)}\n`;
+                csv += `${user.name},${user.username},${user.hourly_rate.toFixed(2)},${user.total_hours.toFixed(2)},${user.total_pay.toFixed(2)}\n`;
             });
             // 明细
             csv += '\n\n明细\n';
-            csv += '姓名,日期,上班时间,下班时间,工时,是否周末,是否未打卡,当日工资\n';
+            csv += '姓名,日期,上班时间,下班时间,工时,当日工资,是否周末,是否未打卡\n';
             payroll.forEach((user) => {
                 user.daily_records.forEach((record) => {
-                    csv += `${user.name},${record.date},${record.clock_in_time || ''},${record.clock_out_time || ''},${record.actual_hours.toFixed(2)},${record.is_weekend ? '是' : '否'},${record.is_missing_clock ? '是' : '否'},${record.daily_pay.toFixed(2)}\n`;
+                    csv += `${user.name},${record.date},${record.clock_in_time || ''},${record.clock_out_time || ''},${record.actual_hours.toFixed(2)},${record.daily_pay.toFixed(2)},${record.is_weekend ? '是' : '否'},${record.is_missing_clock ? '是' : '否'}\n`;
                 });
             });
             res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -186,20 +153,14 @@ router.get('/export', auth_1.authenticate, auth_1.requireAdmin, async (req, res)
                 { header: '用户名', key: 'username', width: 15 },
                 { header: '时薪', key: 'hourly_rate', width: 10 },
                 { header: '总工时', key: 'total_hours', width: 10 },
-                { header: '正常工资', key: 'regular_pay', width: 12 },
-                { header: '加班工资', key: 'overtime_pay', width: 12 },
-                { header: '周末工资', key: 'weekend_pay', width: 12 },
-                { header: '总工资', key: 'total_pay', width: 12 },
+                { header: '应发工资', key: 'total_pay', width: 12 },
             ];
             payroll.forEach((user) => {
                 summarySheet.addRow({
                     name: user.name,
                     username: user.username,
-                    hourly_rate: user.hourly_rate,
+                    hourly_rate: parseFloat(user.hourly_rate.toFixed(2)),
                     total_hours: parseFloat(user.total_hours.toFixed(2)),
-                    regular_pay: parseFloat(user.regular_pay.toFixed(2)),
-                    overtime_pay: parseFloat(user.overtime_pay.toFixed(2)),
-                    weekend_pay: parseFloat(user.weekend_pay.toFixed(2)),
                     total_pay: parseFloat(user.total_pay.toFixed(2)),
                 });
             });
@@ -210,9 +171,9 @@ router.get('/export', auth_1.authenticate, auth_1.requireAdmin, async (req, res)
                 { header: '上班时间', key: 'clock_in_time', width: 20 },
                 { header: '下班时间', key: 'clock_out_time', width: 20 },
                 { header: '工时', key: 'actual_hours', width: 10 },
+                { header: '当日工资', key: 'daily_pay', width: 12 },
                 { header: '是否周末', key: 'is_weekend', width: 10 },
                 { header: '是否未打卡', key: 'is_missing_clock', width: 12 },
-                { header: '当日工资', key: 'daily_pay', width: 12 },
             ];
             payroll.forEach((user) => {
                 user.daily_records.forEach((record) => {
@@ -222,9 +183,9 @@ router.get('/export', auth_1.authenticate, auth_1.requireAdmin, async (req, res)
                         clock_in_time: record.clock_in_time || '',
                         clock_out_time: record.clock_out_time || '',
                         actual_hours: parseFloat(record.actual_hours.toFixed(2)),
+                        daily_pay: parseFloat(record.daily_pay.toFixed(2)),
                         is_weekend: record.is_weekend ? '是' : '否',
                         is_missing_clock: record.is_missing_clock ? '是' : '否',
-                        daily_pay: parseFloat(record.daily_pay.toFixed(2)),
                     });
                 });
             });

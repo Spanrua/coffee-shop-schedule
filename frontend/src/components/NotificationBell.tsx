@@ -129,11 +129,11 @@ export default function NotificationBell() {
           />
 
           {/* 通知列表 */}
-          <div className="absolute right-0 mt-2 w-96 bg-white rounded-lg shadow-xl z-50 max-h-[600px] flex flex-col">
+          <div className="absolute right-0 mt-2 w-[calc(100vw-2rem)] max-w-96 max-h-[calc(100vh-6rem)] overflow-hidden bg-white rounded-lg shadow-xl z-50 flex flex-col">
             {/* 头部 */}
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-900">通知</h3>
-              <div className="flex items-center gap-2">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3">
+              <h3 className="font-semibold text-gray-900 shrink-0">通知</h3>
+              <div className="flex items-center justify-end gap-2 flex-wrap">
                 {unreadCount > 0 && (
                   <button
                     onClick={markAllAsRead}
@@ -167,15 +167,15 @@ export default function NotificationBell() {
                   {notifications.map((notification) => (
                     <div
                       key={notification.id}
-                      className={`p-4 hover:bg-gray-50 transition-colors ${
+                      className={`p-4 min-w-0 hover:bg-gray-50 transition-colors ${
                         !notification.is_read ? 'bg-blue-50' : ''
                       }`}
                     >
-                      <div className="flex items-start gap-3">
-                        <span className="text-2xl">{getNotificationIcon(notification.type)}</span>
+                      <div className="flex items-start gap-3 min-w-0">
+                        <span className="text-2xl shrink-0">{getNotificationIcon(notification.type)}</span>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between gap-2">
-                            <h4 className="font-medium text-gray-900 text-sm">
+                            <h4 className="font-medium text-gray-900 text-sm min-w-0 break-words whitespace-normal">
                               {notification.title}
                             </h4>
                             {!notification.is_read && (
@@ -188,16 +188,16 @@ export default function NotificationBell() {
                               </button>
                             )}
                           </div>
-                          <p className="text-sm text-gray-600 mt-1">
+                          <p className="text-sm text-gray-600 mt-1 break-words whitespace-pre-wrap">
                             {notification.message}
                           </p>
-                          <div className="flex items-center justify-between mt-2">
+                          <div className="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap mt-2">
                             <span className="text-xs text-gray-500">
                               {format(new Date(notification.created_at), 'MM-dd HH:mm', { locale: zhCN })}
                             </span>
                             <button
                               onClick={() => deleteNotification(notification.id)}
-                              className="text-xs text-gray-400 hover:text-red-600"
+                              className="text-xs text-gray-400 hover:text-red-600 shrink-0"
                             >
                               删除
                             </button>
