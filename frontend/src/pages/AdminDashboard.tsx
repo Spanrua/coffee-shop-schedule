@@ -62,6 +62,19 @@ export default function AdminDashboard() {
     }
   };
 
+  const getShiftStatusLabel = (status: string) => {
+    switch (status) {
+      case 'scheduled':
+        return '已排班';
+      case 'confirmed':
+        return '已确认';
+      case 'cancelled':
+        return '已取消';
+      default:
+        return status;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* 顶部导航 */}
@@ -171,21 +184,34 @@ export default function AdminDashboard() {
             {todayShifts.length === 0 ? (
               <p className="text-gray-500 text-center py-8">今天没有排班</p>
             ) : (
-              <div className="space-y-2 max-h-96 overflow-y-auto">
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
                 {todayShifts.map((shift) => (
-                  <div key={shift.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div>
-                      <div className="font-medium text-gray-900">{shift.user_name}</div>
-                      <div className="text-sm text-gray-500">
-                        {shift.start_time} - {shift.end_time}
+                  <div
+                    key={shift.id}
+                    className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-50 rounded-lg"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-gray-900 truncate">
+                        {shift.user_name}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500">
+                        <span className="whitespace-nowrap">
+                          {shift.start_time} - {shift.end_time}
+                        </span>
+                        {shift.store_name && (
+                          <>
+                            <span className="text-gray-300">|</span>
+                            <span className="truncate">{shift.store_name}</span>
+                          </>
+                        )}
                       </div>
                     </div>
-                    <span className={`text-xs px-2 py-1 rounded ${
+                    <span className={`self-start sm:self-center shrink-0 whitespace-nowrap text-xs px-2 py-1 rounded ${
                       shift.status === 'scheduled' ? 'bg-blue-100 text-blue-800' :
                       shift.status === 'confirmed' ? 'bg-green-100 text-green-800' :
                       'bg-gray-100 text-gray-800'
                     }`}>
-                      {shift.status}
+                      {getShiftStatusLabel(shift.status)}
                     </span>
                   </div>
                 ))}
