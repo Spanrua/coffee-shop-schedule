@@ -5,6 +5,16 @@ import { format } from 'date-fns';
 import { Users, Calendar, Clock, DollarSign, LogOut, User as UserIcon, FileText } from 'lucide-react';
 import NotificationBell from '../components/NotificationBell';
 
+const compareTodayShifts = (a: any, b: any) => {
+  const startCompare = String(a.start_time || '').localeCompare(String(b.start_time || ''));
+  if (startCompare !== 0) return startCompare;
+
+  const endCompare = String(a.end_time || '').localeCompare(String(b.end_time || ''));
+  if (endCompare !== 0) return endCompare;
+
+  return String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-CN');
+};
+
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const [onDutyStaff, setOnDutyStaff] = useState<any[]>([]);
@@ -14,7 +24,6 @@ export default function AdminDashboard() {
     todayShifts: 0,
     onDuty: 0,
   });
-  const today = format(new Date(), 'yyyy-MM-dd');
 
   useEffect(() => {
     loadData();
@@ -37,8 +46,11 @@ export default function AdminDashboard() {
 
   const loadTodayShifts = async () => {
     try {
-      const response = await api.get('/shifts', { params: { start_date: today, end_date: today } });
-      setTodayShifts(response.data);
+      const response = await api.get('/shifts/today');
+      setTodayShifts(
+        response.data
+          .sort(compareTodayShifts)
+      );
     } catch (error) {
       console.error('Failed to load shifts:', error);
     }
@@ -48,7 +60,7 @@ export default function AdminDashboard() {
     try {
       const [employeesRes, shiftsRes, onDutyRes] = await Promise.all([
         api.get('/users'),
-        api.get('/shifts', { params: { start_date: today, end_date: today } }),
+        api.get('/shifts/today'),
         api.get('/clock/on-duty'),
       ]);
 

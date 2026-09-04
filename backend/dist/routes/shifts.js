@@ -8,6 +8,7 @@ const db_1 = __importDefault(require("../db"));
 const auth_1 = require("../middleware/auth");
 const date_fns_1 = require("date-fns");
 const storeAccess_1 = require("../utils/storeAccess");
+const time_1 = require("../utils/time");
 const router = (0, express_1.Router)();
 function userCanWorkStore(userId, storeId) {
     const row = db_1.default.prepare(`
@@ -212,7 +213,7 @@ router.get('/my', auth_1.authenticate, (req, res) => {
     }
 });
 router.get('/today', auth_1.authenticate, (req, res) => {
-    const today = (0, date_fns_1.format)(new Date(), 'yyyy-MM-dd');
+    const today = (0, time_1.getChinaToday)();
     try {
         let query = `
       SELECT s.*, u.name as user_name, u.username, st.name as store_name

@@ -9,6 +9,7 @@ import {
   parseRequestedStoreId,
   requireManageableStore,
 } from '../utils/storeAccess';
+import { getChinaToday } from '../utils/time';
 
 const router = Router();
 
@@ -255,7 +256,7 @@ router.get('/my', authenticate, (req: AuthRequest, res) => {
 });
 
 router.get('/today', authenticate, (req: AuthRequest, res) => {
-  const today = format(new Date(), 'yyyy-MM-dd');
+  const today = getChinaToday();
 
   try {
     let query = `

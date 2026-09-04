@@ -27,7 +27,7 @@ export default function EmployeeDashboard() {
 
   const loadTodayShifts = async () => {
     try {
-      const response = await api.get('/shifts/my', { params: { start_date: today, end_date: today } });
+      const response = await api.get('/shifts/today');
       setTodayShifts(response.data);
     } catch (error) {
       console.error('Failed to load shifts:', error);
@@ -36,7 +36,7 @@ export default function EmployeeDashboard() {
 
   const loadTodayClockRecords = async () => {
     try {
-      const response = await api.get('/clock/my', { params: { start_date: today, end_date: today } });
+      const response = await api.get('/clock/today');
       setClockRecords(response.data);
     } catch (error) {
       console.error('Failed to load clock records:', error);

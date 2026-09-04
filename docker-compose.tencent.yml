@@ -12,6 +12,7 @@ services:
       NODE_ENV: production
       JWT_SECRET: ${JWT_SECRET}
       DATABASE_PATH: /app/data/coffee-shop.db
+      TZ: Asia/Shanghai
     volumes:
       - coffee-shop-data:/app/data
 

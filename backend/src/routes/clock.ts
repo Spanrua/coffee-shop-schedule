@@ -2,16 +2,35 @@ import { Router } from 'express';
 import db from '../db';
 import { authenticate, requireAdmin, AuthRequest } from '../middleware/auth';
 import { ClockRecord } from '../models/types';
-import { format, parseISO, differenceInMinutes } from 'date-fns';
+import { differenceInMinutes } from 'date-fns';
 import { buildStoreFilter, getManageableStoreContext, parseRequestedStoreId, requireManageableStore } from '../utils/storeAccess';
+import { getChinaToday, parseChinaDateTime } from '../utils/time';
 
 const router = Router();
+
+function isClockAnomaly(clockInTime: Date, clockOutTime: Date | null, shift: any): boolean {
+  if (!shift) return true;
+
+  const shiftStart = parseChinaDateTime(shift.date, shift.start_time);
+  if (Math.abs(differenceInMinutes(clockInTime, shiftStart)) > 120) {
+    return true;
+  }
+
+  if (clockOutTime) {
+    const shiftEnd = parseChinaDateTime(shift.date, shift.end_time);
+    if (Math.abs(differenceInMinutes(clockOutTime, shiftEnd)) > 120) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 // 上班打卡
 router.post('/in', authenticate, (req: AuthRequest, res) => {
   const { shift_id } = req.body;
   const now = new Date();
-  const today = format(now, 'yyyy-MM-dd');
+  const today = getChinaToday();
   const clockInTime = now.toISOString();
 
   try {
@@ -27,25 +46,12 @@ router.post('/in', authenticate, (req: AuthRequest, res) => {
     }
 
     // 检查异常：打卡时间与排班时间的差距
-    let isAnomaly = false;
     let shift: any = null;
 
     if (shift_id) {
       shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(shift_id) as any;
-
-      if (shift) {
-        const shiftStart = parseISO(`${shift.date}T${shift.start_time}`);
-        const minutesDiff = Math.abs(differenceInMinutes(now, shiftStart));
-
-        // 超过2小时（120分钟）标记为异常
-        if (minutesDiff > 120) {
-          isAnomaly = true;
-        }
-      }
-    } else {
-      // 没有关联班次也标记为异常
-      isAnomaly = true;
     }
+    const isAnomaly = isClockAnomaly(now, null, shift);
 
     // 插入打卡记录
     const result = db.prepare(`
@@ -97,20 +103,10 @@ router.post('/out', authenticate, (req: AuthRequest, res) => {
     }
 
     // 检查异常
-    let isAnomaly = record.is_anomaly;
-
-    if (record.shift_id) {
-      const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(record.shift_id) as any;
-
-      if (shift) {
-        const shiftEnd = parseISO(`${shift.date}T${shift.end_time}`);
-        const minutesDiff = Math.abs(differenceInMinutes(now, shiftEnd));
-
-        if (minutesDiff > 120) {
-          isAnomaly = true;
-        }
-      }
-    }
+    const shift = record.shift_id
+      ? db.prepare('SELECT * FROM shifts WHERE id = ?').get(record.shift_id) as any
+      : null;
+    const isAnomaly = isClockAnomaly(new Date(record.clock_in_time), now, shift);
 
     // 更新打卡记录
     db.prepare(`
@@ -131,7 +127,7 @@ router.post('/out', authenticate, (req: AuthRequest, res) => {
 
 // 获取今日打卡记录
 router.get('/today', authenticate, (req: AuthRequest, res) => {
-  const today = format(new Date(), 'yyyy-MM-dd');
+  const today = getChinaToday();
 
   try {
     let query = `
@@ -309,7 +305,7 @@ router.put('/records/:id', authenticate, requireAdmin, (req: AuthRequest, res) =
 
 // 获取当前在岗人员
 router.get('/on-duty', authenticate, (req: AuthRequest, res) => {
-  const today = format(new Date(), 'yyyy-MM-dd');
+  const today = getChinaToday();
 
   try {
     let query = `
